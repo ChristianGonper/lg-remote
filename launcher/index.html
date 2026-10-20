@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Inicio</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    try {
+      if (window.PalmSystem && window.PalmSystem.stageReady) window.PalmSystem.stageReady();
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="stage">
+    <header id="top">
+      <div class="brand">INICIO</div>
+      <div id="greet">Buenas tardes</div>
+      <div id="date-line"></div>
+      <div id="clock">--:--</div>
+    </header>
+
+    <section id="now">
+      <div class="kicker">AHORA</div>
+      <div id="now-title">Sin reproducción</div>
+      <div id="now-detail">Elige una aplicación o una entrada.</div>
+      <div class="cast">
+        <div class="kicker">CAST</div>
+        <div class="cast-sub">no disponible</div>
+      </div>
+    </section>
+
+    <h2 class="label">Aplicaciones</h2>
+    <div id="apps" class="tiles"></div>
+
+    <h2 class="label">Entradas</h2>
+    <div id="inputs" class="tiles"></div>
+
+    <footer id="foot">
+      <span class="hint"><b>Flechas</b> mover</span>
+      <span class="hint"><b>OK</b> abrir</span>
+      <span class="hint"><b>Atrás</b> volver</span>
+      <span id="mode"></span>
+    </footer>
+
+    <div id="toast" class="hidden"></div>
+
+    <div id="overlay" class="hidden">
+      <div class="sheet">
+        <h2 id="overlay-title"></h2>
+        <p id="overlay-sub"></p>
+        <div id="overlay-grid"></div>
+      </div>
+    </div>
+
+    <div id="debug" class="hidden"></div>
+  </div>
+
+  <script src="js/model.js"></script>
+  <script src="js/luna.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/glyphs.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

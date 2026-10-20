@@ -226,3 +226,7 @@ TV_IP=127.0.0.1 node server.js   # y abre http://127.0.0.1:8765
 - **El texto no aparece**: tiene que haber un campo de texto del sistema con el teclado de la tele abierto. En YouTube se envía como búsqueda (ver “Texto y YouTube”).
 - **“500 Application error” en Entrada/Apps**: mira `/api/log` y la consola; se reintenta y se usan alternativas automáticamente.
 - **Desde la tablet no carga**: misma Wi-Fi, y usa la IP del móvil que muestra Termux.
+
+## Lanzador en la tele
+
+En `launcher/` hay un prototipo de pantalla de inicio (app webOS instalable). No sustituye al home del sistema ni toca el firmware. Ver `launcher/README.md`.

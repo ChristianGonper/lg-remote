@@ -1,0 +1,378 @@
+/* webOS 2: sin flexbox, sin grid, sin variables CSS. Caja de 1280x720. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #f6f1e8;
+  font-family: "LG Display", "Museo Sans", "Segoe UI", "Trebuchet MS", sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button, h2, p { font-family: inherit; }
+
+#stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1280px;
+  height: 720px;
+  box-sizing: border-box;
+  padding: 26px 48px 52px;
+  overflow: hidden;
+  background-color: #12110f;
+  background-image: -webkit-radial-gradient(circle at 18% 0%, #3c2e22 0%, rgba(18, 17, 15, 0) 52%);
+  background-image: radial-gradient(circle at 18% 0%, #3c2e22 0%, rgba(18, 17, 15, 0) 52%);
+}
+
+#top {
+  position: relative;
+  height: 84px;
+}
+
+.brand {
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: #f0b429;
+}
+
+#greet {
+  font-size: 32px;
+  line-height: 36px;
+  margin-top: 2px;
+}
+
+#date-line {
+  font-size: 16px;
+  line-height: 20px;
+  color: #b3aa9e;
+  margin-top: 2px;
+}
+
+#clock {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-size: 64px;
+  line-height: 68px;
+  letter-spacing: -1px;
+}
+
+#now {
+  position: relative;
+  height: 150px;
+  margin-top: 6px;
+  background: #1e1b17;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px #3a342c;
+}
+
+#now:before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 22px;
+  bottom: 22px;
+  width: 6px;
+  background: #f0b429;
+  border-radius: 0 4px 4px 0;
+}
+
+.kicker {
+  position: absolute;
+  left: 28px;
+  top: 20px;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  color: #f0b429;
+}
+
+#now-title {
+  position: absolute;
+  left: 28px;
+  right: 210px;
+  top: 46px;
+  font-size: 36px;
+  line-height: 40px;
+}
+
+#now-detail {
+  position: absolute;
+  left: 28px;
+  right: 210px;
+  top: 98px;
+  font-size: 18px;
+  line-height: 24px;
+  color: #b3aa9e;
+}
+
+.cast {
+  position: absolute;
+  right: 28px;
+  top: 36px;
+  width: 170px;
+  text-align: right;
+}
+
+.cast .kicker {
+  position: static;
+  color: #8a8176;
+}
+
+.cast-sub {
+  margin-top: 8px;
+  font-size: 16px;
+  line-height: 20px;
+  color: #b3aa9e;
+}
+
+h2.label {
+  margin: 18px 0 10px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: normal;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8a8176;
+}
+
+.tiles {
+  font-size: 0;
+  white-space: nowrap;
+}
+
+.tile {
+  display: inline-block;
+  vertical-align: top;
+  position: relative;
+  width: 176px;
+  height: 140px;
+  margin: 0 16px 0 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: #26221c;
+  border-radius: 16px;
+  color: #f6f1e8;
+  overflow: hidden;
+  white-space: normal;
+  font-size: 16px;
+  -webkit-transition: background-color 120ms linear;
+  transition: background-color 120ms linear;
+}
+
+.tile .bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+}
+
+.glyph {
+  display: block;
+  width: 40px;
+  height: 40px;
+  margin: 22px 0 0 14px;
+}
+
+.glyph svg {
+  display: block;
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+}
+
+.tile-title {
+  position: absolute;
+  left: 14px;
+  right: 12px;
+  bottom: 30px;
+  font-size: 20px;
+  line-height: 22px;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile-sub {
+  position: absolute;
+  left: 14px;
+  right: 12px;
+  bottom: 12px;
+  font-size: 14px;
+  line-height: 16px;
+  color: #b3aa9e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dot {
+  position: absolute;
+  top: 16px;
+  right: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3d4a38;
+}
+
+.dot.on { background: #7dba6a; }
+
+.dot.off {
+  background: transparent;
+  border: 2px solid #6a6258;
+  width: 6px;
+  height: 6px;
+}
+
+.tile.is-focused {
+  background: #4a3d2c;
+  outline: 4px solid #f0b429;
+  outline-offset: 4px;
+}
+
+#foot {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  bottom: 16px;
+  height: 28px;
+  font-size: 15px;
+  line-height: 28px;
+  color: #8a8176;
+}
+
+.hint {
+  display: inline-block;
+  margin-right: 22px;
+}
+
+.hint b {
+  display: inline-block;
+  min-width: 18px;
+  margin-right: 6px;
+  padding: 0 7px;
+  border: 1px solid #5c554c;
+  border-radius: 6px;
+  color: #f6f1e8;
+  font-weight: normal;
+  line-height: 22px;
+}
+
+#mode {
+  position: absolute;
+  right: 0;
+  top: 0;
+  color: #f0b429;
+}
+
+#toast {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  width: 720px;
+  margin-left: -360px;
+  z-index: 6;
+  box-sizing: border-box;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: #f6f1e8;
+  color: #1a1612;
+  text-align: center;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+#toast.hidden { display: none; }
+
+#overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1280px;
+  height: 720px;
+  z-index: 5;
+  background: rgba(10, 9, 8, 0.94);
+}
+
+#overlay.hidden { display: none; }
+
+#overlay .sheet {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  top: 28px;
+  bottom: 36px;
+}
+
+#overlay-title {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  margin: 0;
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #f6f1e8;
+}
+
+#overlay-sub {
+  position: absolute;
+  right: 0;
+  top: 16px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 22px;
+  color: #b3aa9e;
+}
+
+#overlay-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 64px;
+  bottom: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#overlay-grid::-webkit-scrollbar { width: 0; height: 0; }
+
+#overlay-empty {
+  margin: 24px 0 0;
+  font-size: 18px;
+  color: #b3aa9e;
+}
+
+#overlay-grid .tile {
+  margin-bottom: 16px;
+}
+
+#debug {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  bottom: 52px;
+  height: 168px;
+  z-index: 7;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.88);
+  color: #d7d0c4;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 17px;
+  white-space: pre-wrap;
+}
+
+#debug.hidden { display: none; }

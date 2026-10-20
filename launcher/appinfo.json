@@ -1,0 +1,15 @@
+{
+  "id": "com.christiangonper.launcher",
+  "version": "0.1.0",
+  "vendor": "Christian",
+  "type": "web",
+  "main": "index.html",
+  "title": "Inicio",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "splashBackground": "splash.png",
+  "resolution": "1280x720",
+  "uiRevision": 2,
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": true
+}
