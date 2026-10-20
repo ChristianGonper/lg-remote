@@ -99,6 +99,68 @@ function startServer(tvPort, wolPort) {
     assert.equal(apps.data.apps.length, 2);
     ok('lista de apps');
 
+    console.log('3b) Fallos tipo webOS 2 ("500 Application error") y alternativas');
+    mock.state.fail['tv/getExternalInputList'] = 1;
+    const inp1 = await action({ type: 'inputs' });
+    assert.ok(inp1.ok && inp1.data.via === 'getExternalInputList' && inp1.data.devices.length === 3, JSON.stringify(inp1));
+    ok('un 500 transitorio en getExternalInputList se reintenta');
+    mock.state.fail['tv/getExternalInputList'] = Infinity;
+    mock.state.fail['com.webos.applicationManager/listLaunchPoints'] = Infinity;
+    const inp2 = await action({ type: 'inputs' });
+    assert.ok(inp2.ok, inp2.error);
+    assert.equal(inp2.data.via, 'listLaunchPoints');
+    assert.deepEqual(inp2.data.devices.map((d) => d.id), ['HDMI_1', 'HDMI_2']);
+    ok('si getExternalInputList falla, las entradas se deducen de las apps HDMI (listApps)');
+    const apps2 = await action({ type: 'apps' });
+    assert.ok(apps2.ok, apps2.error);
+    assert.ok(apps2.data.apps.some((x) => x.id === 'netflix') && !apps2.data.apps.some((x) => x.id === 'com.webos.app.oculto'));
+    ok('si listLaunchPoints falla, la lista de apps sale de listApps (sin ocultas)');
+    mock.state.fail['tv/switchInput'] = Infinity;
+    const sw = await action({ type: 'input', id: 'HDMI_1', appId: 'com.webos.app.hdmi1' });
+    assert.ok(sw.ok && sw.data.via === 'launch', JSON.stringify(sw));
+    assert.equal(mock.state.input, 'HDMI_1');
+    ok('si switchInput falla, se abre la app de la entrada (com.webos.app.hdmi1)');
+    mock.state.fail['com.webos.applicationManager/listApps'] = Infinity;
+    const bad = await action({ type: 'apps' });
+    assert.ok(!bad.ok && /500 Application error/.test(bad.error) && /listLaunchPoints/.test(bad.error), bad.error);
+    const elog = await fetch(`http://127.0.0.1:${HTTP_PORT}/api/log`).then((r) => r.json());
+    assert.ok(elog.errors.some((e) => /listLaunchPoints/.test(e.uri) && e.raw && e.raw.error === '500 Application error'));
+    assert.ok(/ERROR TV ssap:\/\/com.webos.applicationManager\/listLaunchPoints/.test(srv.out));
+    ok('el error real de la TV llega a la UI con la URI y queda en el log y en /api/log');
+    mock.state.fail = {};
+
+    console.log('3c) Texto: IME del sistema vs YouTube');
+    mock.state.foreground = 'com.webos.app.browser';
+    let n0 = mock.log.requests.length;
+    let t = await action({ type: 'text', text: 'hola mundo' });
+    assert.ok(t.ok && t.data.via === 'ime', JSON.stringify(t));
+    assert.ok(mock.log.requests.slice(n0).some((r) => r.uri === 'ssap://com.webos.service.ime/insertText' && r.payload.text === 'hola mundo'));
+    ok('fuera de YouTube el texto va por com.webos.service.ime/insertText');
+    mock.state.foreground = 'youtube.leanback.v4';
+    n0 = mock.log.requests.length;
+    t = await action({ type: 'text', text: 'lofi & chill' });
+    assert.ok(t.ok && t.data.via === 'youtube', JSON.stringify(t));
+    assert.ok(!mock.log.requests.slice(n0).some((r) => /insertText/.test(r.uri)));
+    assert.deepEqual(mock.state.launched.at(-1), { id: 'youtube.leanback.v4', params: { contentTarget: 'https://www.youtube.com/tv?launch=search&q=lofi%20%26%20chill' } });
+    assert.equal(t.data.variant, 'auto:url');
+    ok('con YouTube delante el texto se envía como búsqueda (app web antigua → contentTarget URL completa)');
+    for (const [variant, target] of [['hash', 'https://www.youtube.com/tv#/search?q=a%20b'], ['q', 'q=a%20b']]) {
+      t = await action({ type: 'text', text: 'a b', variant });
+      assert.ok(t.ok && mock.state.launched.at(-1).params.contentTarget === target, variant + ' ' + JSON.stringify(t));
+    }
+    const yi = await action({ type: 'ytInfo' });
+    assert.ok(yi.ok && yi.data.deeplinkingParams.contentTarget.includes('youtube.com/tv'));
+    ok('formatos alternativos hash / q= seleccionables y diagnóstico ytInfo');
+    const pb = mock.log.pointer.length;
+    assert.ok((await action({ type: 'enter' })).ok);
+    await waitFor(() => mock.log.pointer.length > pb, 2000, 'ENTER pointer');
+    assert.equal(mock.log.pointer.at(-1), 'type:button\nname:ENTER\n\n');
+    ok('Intro en YouTube pulsa OK por el pointer socket');
+    mock.state.foreground = 'com.webos.app.livetv';
+    t = await action({ type: 'text', text: 'gatos', mode: 'youtube', variant: 'q' });
+    assert.ok(t.ok && mock.state.launched.at(-1).params.contentTarget === 'q=gatos');
+    ok('botón "Buscar en YouTube" abre YouTube con la búsqueda');
+
     console.log('4) Puntero');
     const pBefore = mock.log.pointer.length;
     await action({ type: 'move', dx: 10.4, dy: -3 });

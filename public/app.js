@@ -141,11 +141,11 @@
     if (!r.ok) return openSheet('Entradas', `<p class="note">No se pudo leer la lista: ${esc(r.error)}</p>`);
     const items = [{ id: '__livetv', label: 'TV (Live TV)', connected: true }, ...r.data.devices];
     openSheet('Entradas', '<div class="list">' + items.map((d) =>
-      `<button class="b ${d.connected === false ? 'off' : ''}" data-input="${esc(d.id)}">${esc(d.label)}${d.connected === false ? ' <small>(sin señal)</small>' : ''}</button>`).join('') + '</div>');
+      `<button class="b ${d.connected === false ? 'off' : ''}" data-input="${esc(d.id)}" data-app="${esc(d.appId || '')}">${esc(d.label)}${d.connected === false ? ' <small>(sin señal)</small>' : ''}</button>`).join('') + '</div>');
     $$('[data-input]', $('#sheetBody')).forEach((b) => b.addEventListener('click', async () => {
       buzz();
       const id = b.dataset.input;
-      const res = id === '__livetv' ? await send({ type: 'liveTv' }) : await send({ type: 'input', id });
+      const res = id === '__livetv' ? await send({ type: 'liveTv' }) : await send({ type: 'input', id, appId: b.dataset.app || '' });
       if (res.ok) closeSheet();
     }));
   }
@@ -186,8 +186,19 @@
     e.preventDefault();
     const inp = $('#textIn');
     if (!inp.value) return send({ type: 'enter' });
-    const r = await send({ type: 'text', text: inp.value });
-    if (r.ok) { buzz(); inp.value = ''; }
+    const r = await send({ type: 'text', text: inp.value, variant: $('#ytVariant').value });
+    if (r.ok) {
+      buzz(); inp.value = '';
+      if (r.data && r.data.via === 'youtube') toast('🔎 Buscado en YouTube (' + r.data.variant + ')');
+    }
+  });
+  $('#ytVariant').value = localStorage.getItem('ytVariant') || 'auto';
+  $('#ytVariant').addEventListener('change', (e) => localStorage.setItem('ytVariant', e.target.value));
+  $('#btnYt').addEventListener('click', async () => {
+    const inp = $('#textIn');
+    if (!inp.value) { inp.focus(); return toast('Escribe primero lo que quieres buscar'); }
+    const r = await send({ type: 'text', text: inp.value, mode: 'youtube', variant: $('#ytVariant').value });
+    if (r.ok) { buzz(); inp.value = ''; toast('🔎 Buscado en YouTube (' + r.data.variant + ')'); }
   });
 
   // ---------- Touchpad ----------

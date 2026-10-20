@@ -10,7 +10,8 @@ const WebSocket = require('ws');
 
 function createMockTv({ port = 0, promptDelay = 300, key = 'MOCK-CLIENT-KEY-1234' } = {}) {
   const log = { requests: [], pointer: [], registers: [] };
-  const state = { volume: 10, muted: false, input: 'HDMI_1' };
+  // fail: uri (sin ssap://) -> nº de veces que responderá '500 Application error' (Infinity = siempre)
+  const state = { volume: 10, muted: false, input: 'HDMI_1', foreground: 'com.webos.app.livetv', fail: {}, launched: [] };
   const server = http.createServer();
   const wss = new WebSocket.Server({ noServer: true });
   const pwss = new WebSocket.Server({ noServer: true });
@@ -41,6 +42,13 @@ function createMockTv({ port = 0, promptDelay = 300, key = 'MOCK-CLIENT-KEY-1234
       { id: 'AV_1', label: 'AV', connected: false, appId: 'com.webos.app.externalinput.av1' }] }),
     'ssap://tv/switchInput': (p) => { state.input = p.inputId; return {}; },
     'ssap://com.webos.applicationManager/listLaunchPoints': () => ({ launchPoints: [{ id: 'youtube.leanback.v4', title: 'YouTube' }, { id: 'netflix', title: 'Netflix' }] }),
+    'ssap://com.webos.applicationManager/listApps': () => ({ apps: [
+      // Como la app web antigua de webOS 1/2: deep link = URL completa de youtube.com/tv
+      { id: 'youtube.leanback.v4', title: 'YouTube', visible: true, type: 'web', deeplinkingParams: '{"contentTarget":"https://www.youtube.com/tv?v=$CONTENTID"}' }, { id: 'netflix', title: 'Netflix', visible: true },
+      { id: 'com.webos.app.hdmi1', title: 'HDMI1', visible: true }, { id: 'com.webos.app.hdmi2', title: 'HDMI2', visible: true },
+      { id: 'com.webos.app.oculto', title: 'Oculta', visible: false }] }),
+    'ssap://com.webos.applicationManager/getForegroundAppInfo': () => ({ appId: state.foreground, windowId: '', processId: '' }),
+    'ssap://system.launcher/launch': (p) => { state.launched.push(p); state.foreground = p.id; if (/^com\.webos\.app\.hdmi(\d)$/.test(p.id)) state.input = 'HDMI_' + RegExp.$1; return { id: p.id }; },
   };
 
   wss.on('connection', (ws) => {
@@ -56,6 +64,12 @@ function createMockTv({ port = 0, promptDelay = 300, key = 'MOCK-CLIENT-KEY-1234
       }
       log.requests.push({ type: msg.type, uri: msg.uri, payload: msg.payload });
       if (msg.type === 'subscribe' && msg.uri === 'ssap://audio/getVolume') { volSubs.add([ws, msg.id]); return pushVol(); }
+      const short = String(msg.uri).replace(/^ssap:\/\//, '');
+      if (state.fail[short] > 0) {
+        state.fail[short]--;
+        // Formato real de webOS para un fallo del servicio
+        return ws.send(JSON.stringify({ type: 'error', id: msg.id, error: '500 Application error', payload: {} }));
+      }
       const h = handlers[msg.uri];
       const payload = h ? h(msg.payload || {}) : {};
       ws.send(JSON.stringify({ type: 'response', id: msg.id, payload: { returnValue: true, ...payload } }));

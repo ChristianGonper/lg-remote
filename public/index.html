@@ -147,7 +147,7 @@
 
 <!-- ===================== TEXTO / APPS ===================== -->
 <section class="page" id="page-texto">
-  <p class="hint">Abre primero un campo de texto en la TV (p. ej. el buscador de YouTube) para que aparezca su teclado.</p>
+  <p class="hint">Campos de texto del sistema (navegador, búsquedas de LG…): abre el campo en la TV y escribe aquí. En YouTube el texto se envía como búsqueda (YouTube usa su propio teclado y no acepta texto remoto en webOS 2).</p>
   <form id="textForm" class="textform">
     <input id="textIn" type="text" autocomplete="off" placeholder="Escribe aquí…" enterkeyhint="send">
     <button class="b" type="submit">Enviar</button>
@@ -156,6 +156,15 @@
     <button class="b" data-act="delete">⌫<small>Borrar</small></button>
     <button class="b" data-act="enter">⏎<small>Intro</small></button>
     <button class="b" data-act="toast">💬<small>Aviso prueba</small></button>
+  </div>
+  <div class="row r2">
+    <button class="b" type="button" id="btnYt">🔎 Buscar en YouTube</button>
+    <select id="ytVariant" class="b sm" aria-label="Formato de búsqueda de YouTube">
+      <option value="auto">Formato: auto</option>
+      <option value="url">URL ?launch=search&amp;q=</option>
+      <option value="hash">URL #/search?q=</option>
+      <option value="q">q= (app moderna)</option>
+    </select>
   </div>
   <div class="row r1"><button class="b" data-act="apps">Cargar lista de apps</button></div>
   <div class="list" id="appsList"></div>

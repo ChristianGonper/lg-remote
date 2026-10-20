@@ -32,6 +32,7 @@ function loadConfig() {
     port: Number(env.PORT || file.port) || 8765,
     stateFile: env.STATE_FILE || file.stateFile || path.join(DIR, 'tv-state.json'),
     wolAddresses: (env.WOL_ADDRESSES && env.WOL_ADDRESSES.split(',')) || file.wolAddresses || null,
+    ytSearch: env.YT_SEARCH || file.ytSearch || '',
     wolPorts: (env.WOL_PORTS && env.WOL_PORTS.split(',').map(Number)) || file.wolPorts || [9, 7],
   };
   if (!cfg.wolAddresses) cfg.wolAddresses = ['255.255.255.255', wol.subnetBroadcast(cfg.tvIp), cfg.tvIp].filter(Boolean);
@@ -73,6 +74,14 @@ tv.on('macs', (macs) => {
   log('MAC aprendidas de la TV:', JSON.stringify(macs));
   broadcast({ event: 'status', ...publicStatus() });
 });
+// Registro de los últimos errores de la TV (respuesta cruda incluida): GET /api/log
+const errLog = [];
+tv.on('requestError', (e) => {
+  const entry = { at: new Date().toISOString(), uri: e.uri, payload: e.payload, error: e.error, raw: e.raw };
+  errLog.push(entry);
+  if (errLog.length > 50) errLog.shift();
+  log('ERROR TV', e.uri, JSON.stringify(e.payload), '->', e.error, e.raw ? JSON.stringify(e.raw) : '');
+});
 tv.on('volume', (v) => { live.volume = v; broadcast({ event: 'volume', ...v }); });
 tv.on('info', (i) => { Object.assign(live.info, i); broadcast({ event: 'status', ...publicStatus() }); });
 
@@ -111,6 +120,176 @@ const SSAP = {
 };
 const MEDIA = { PLAY: 'play', PAUSE: 'pause', STOP: 'stop', REWIND: 'rewind', FASTFORWARD: 'fastForward' };
 const BUTTON_RE = /^[A-Z0-9_]{1,24}$/;
+
+// ---------- Entradas, apps y texto con alternativas para webOS 2 ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const errMsg = (e) => (e && e.message) || String(e);
+
+/** Petición con un reintento si la TV responde 500 (en webOS 2 algunos servicios fallan de forma transitoria). */
+async function req(uri, payload) {
+  try { return await tv.request(uri, payload); } catch (e) {
+    if (e.code !== 500) throw e;
+    await sleep(400);
+    return tv.request(uri, payload);
+  }
+}
+
+// Apps que son entradas externas (para deducir la lista de entradas desde listLaunchPoints)
+const INPUT_APP_RE = /^com\.webos\.app\.(hdmi\d*|externalinput\..+|livetv)$/;
+function inputIdFromAppId(appId) {
+  let m = /^com\.webos\.app\.hdmi(\d+)$/.exec(appId);
+  if (m) return 'HDMI_' + m[1];
+  m = /^com\.webos\.app\.externalinput\.(av|scart|component|comp)(\d*)$/.exec(appId);
+  if (m) return ({ av: 'AV', scart: 'SCART', component: 'COMP', comp: 'COMP' })[m[1]] + '_' + (m[2] || '1');
+  return '';
+}
+function appIdFromInputId(id) {
+  const m = /^HDMI_?(\d+)$/i.exec(id);
+  return m ? 'com.webos.app.hdmi' + m[1] : '';
+}
+const inputApps = new Map(); // inputId -> appId (de la última lista)
+
+function normalizeLaunchPoints(r) {
+  const list = (r && (r.launchPoints || r.apps)) || [];
+  return list
+    .filter((p) => p && (p.id || p.appId) && p.visible !== false)
+    .map((p) => ({ id: String(p.id || p.appId), title: String(p.title || p.id || p.appId) }));
+}
+
+async function launchPoints() {
+  const errors = [];
+  for (const [uri, payload] of [['com.webos.applicationManager/listLaunchPoints', {}], ['com.webos.applicationManager/listApps', {}]]) {
+    try {
+      const pts = normalizeLaunchPoints(await req(uri, payload));
+      if (pts.length) return pts;
+      errors.push(uri + ': lista vacía');
+    } catch (e) { errors.push(errMsg(e)); }
+  }
+  throw new Error('no se pudo leer la lista de apps: ' + errors.join(' | '));
+}
+
+async function getApps() {
+  const apps = await launchPoints();
+  return { apps: apps.sort((x, y) => x.title.localeCompare(y.title, 'es')) };
+}
+
+async function getInputs() {
+  let first;
+  try {
+    const r = await req('tv/getExternalInputList');
+    const devs = (r.devices || r.inputList || r.externalInputList || []).filter((d) => d && (d.id || d.appId));
+    if (devs.length) {
+      const devices = devs.map((d) => {
+        const id = String(d.id || inputIdFromAppId(d.appId) || d.appId);
+        const appId = d.appId ? String(d.appId) : appIdFromInputId(id);
+        if (appId) inputApps.set(id, appId);
+        return { id, label: String(d.label || d.name || id), connected: d.connected, appId };
+      });
+      return { devices, via: 'getExternalInputList' };
+    }
+    first = new Error('getExternalInputList devolvió una lista vacía');
+  } catch (e) { first = e; }
+  // Alternativa: deducir las entradas de las apps HDMI/AV que aparecen en listLaunchPoints
+  try {
+    const devices = (await launchPoints())
+      .filter((p) => INPUT_APP_RE.test(p.id) && p.id !== 'com.webos.app.livetv')
+      .map((p) => {
+        const id = inputIdFromAppId(p.id) || p.id;
+        inputApps.set(id, p.id);
+        return { id, label: p.title, appId: p.id };
+      });
+    if (devices.length) return { devices, via: 'listLaunchPoints', warning: errMsg(first) };
+  } catch (e) { throw new Error(errMsg(first) + ' | ' + errMsg(e)); }
+  throw first;
+}
+
+async function switchInput(id, appId) {
+  if (!id && !appId) throw new Error('falta la entrada');
+  appId = appId || inputApps.get(id) || appIdFromInputId(id) || (/^com\./.test(id) ? id : '');
+  let first;
+  if (id && !/^com\./.test(id)) {
+    try { return { via: 'switchInput', ...(await req('tv/switchInput', { inputId: id })) }; } catch (e) { first = e; }
+  }
+  // Alternativa (fiable en webOS 2): abrir la app de la entrada, p. ej. com.webos.app.hdmi1
+  if (appId) {
+    try { return { via: 'launch', appId, ...(await launchApp(appId)) }; } catch (e) {
+      throw new Error((first ? errMsg(first) + ' | ' : '') + errMsg(e));
+    }
+  }
+  throw first || new Error('entrada desconocida: ' + id);
+}
+
+async function launchApp(id, params) {
+  if (!id) throw new Error('falta el id de la app');
+  const payload = params ? { id, params } : { id };
+  try { return await req('system.launcher/launch', payload); } catch (e) {
+    try { return await tv.request('com.webos.applicationManager/launch', payload); } catch (_) { throw e; }
+  }
+}
+
+async function foregroundApp() {
+  try {
+    const r = await tv.request('com.webos.applicationManager/getForegroundAppInfo');
+    return r.appId || null;
+  } catch (_) { return null; }
+}
+const isYouTube = (appId) => /^youtube\./i.test(appId || '');
+
+/**
+ * YouTube en webOS 2 (app antigua youtube.leanback.v4) usa su propio teclado en pantalla, no el IME
+ * del sistema: com.webos.service.ime/insertText responde OK pero no escribe nada. Lo que sí acepta
+ * es (re)lanzarla con params.contentTarget. Formatos (según fuentes, ver README):
+ *   q    -> "q=<texto>"                                   (inAppSearchParams de la app Cobalt moderna)
+ *   url  -> "https://www.youtube.com/tv?launch=search&q=<texto>"  (app web antigua: contentTarget = URL completa)
+ *   hash -> "https://www.youtube.com/tv#/search?q=<texto>"
+ *   auto -> se deduce de deeplinkingParams / inAppSearchParams que la propia TV da en listApps.
+ * Se puede forzar con cfg.ytSearch / YT_SEARCH (q|url|hash o una plantilla con {q}).
+ */
+const YT_ID = 'youtube.leanback.v4';
+const YT_TEMPLATES = {
+  q: { key: 'contentTarget', tpl: 'q={q}' },
+  url: { key: 'contentTarget', tpl: 'https://www.youtube.com/tv?launch=search&q={q}' },
+  hash: { key: 'contentTarget', tpl: 'https://www.youtube.com/tv#/search?q={q}' },
+};
+let ytInfoCache = null;
+async function youtubeAppInfo() {
+  if (ytInfoCache) return ytInfoCache;
+  const r = await req('com.webos.applicationManager/listApps');
+  const app = (r.apps || []).find((x) => isYouTube(x.id));
+  if (!app) throw new Error('YouTube no aparece en listApps');
+  const parse = (v) => { if (!v) return null; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch (_) { return null; } };
+  ytInfoCache = { id: app.id, version: app.version, type: app.type, main: app.main,
+    deeplinkingParams: parse(app.deeplinkingParams), inAppSearchParams: parse(app.inAppSearchParams) };
+  return ytInfoCache;
+}
+async function youtubeTemplate(variant) {
+  const v = variant && variant !== 'auto' ? variant : (cfg.ytSearch || 'auto');
+  if (YT_TEMPLATES[v]) return { ...YT_TEMPLATES[v], variant: v };
+  if (v.includes('{q}')) return { key: 'contentTarget', tpl: v, variant: 'custom' };
+  // auto
+  try {
+    const info = await youtubeAppInfo();
+    const isp = info.inAppSearchParams;
+    if (isp) {
+      const key = Object.keys(isp).find((k) => typeof isp[k] === 'string' && isp[k].includes('$SEARCH_KEYWORD'));
+      if (key) return { key, tpl: isp[key].replace('$SEARCH_KEYWORD', '{q}'), variant: 'auto:inAppSearchParams' };
+    }
+    const dl = info.deeplinkingParams && info.deeplinkingParams.contentTarget;
+    if (typeof dl === 'string' && /^https?:/.test(dl)) return { ...YT_TEMPLATES.url, variant: 'auto:url' };
+    return { ...YT_TEMPLATES.q, variant: 'auto:q' };
+  } catch (_) {
+    // En webOS 2 la app es la web antigua: lo más probable es que espere la URL completa
+    return { ...YT_TEMPLATES.url, variant: 'auto:url (sin info de la app)' };
+  }
+}
+async function youtubeSearch(text, fg, variant) {
+  const id = isYouTube(fg) ? fg : YT_ID;
+  const t = await youtubeTemplate(variant);
+  const target = t.tpl.replace('{q}', encodeURIComponent(text));
+  await launchApp(id, { [t.key]: target });
+  log('búsqueda YouTube', t.variant, t.key + '=' + target);
+  return { via: 'youtube', appId: id, variant: t.variant, [t.key]: target };
+}
 
 async function doAction(a) {
   switch (a.type) {
@@ -156,24 +335,37 @@ async function doAction(a) {
       try { return await tv.request('com.webos.service.tv.power/turnOffScreen'); } catch (_) { return tv.request('com.webos.service.tvpower/power/turnOffScreen'); }
     case 'screenOn':
       try { return await tv.request('com.webos.service.tv.power/turnOnScreen'); } catch (_) { return tv.request('com.webos.service.tvpower/power/turnOnScreen'); }
-    case 'inputs': {
-      const r = await tv.request('tv/getExternalInputList');
-      return { devices: (r.devices || []).map((d) => ({ id: d.id, label: d.label || d.id, connected: d.connected, appId: d.appId })) };
-    }
+    case 'inputs':
+      return getInputs();
     case 'input':
-      return tv.request('tv/switchInput', { inputId: String(a.id) });
-    case 'apps': {
-      const r = await tv.request('com.webos.applicationManager/listLaunchPoints');
-      return { apps: (r.launchPoints || []).map((p) => ({ id: p.id, title: p.title })).sort((x, y) => String(x.title).localeCompare(String(y.title))) };
-    }
+      return switchInput(String(a.id || ''), a.appId ? String(a.appId) : '');
+    case 'apps':
+      return getApps();
     case 'launch':
-      return tv.request('system.launcher/launch', { id: String(a.id) });
+      return launchApp(String(a.id || ''));
     case 'liveTv':
-      return tv.request('system.launcher/launch', { id: 'com.webos.app.livetv' });
-    case 'text':
-      return tv.request('com.webos.service.ime/insertText', { text: String(a.text || ''), replace: 0 });
-    case 'enter':
-      return tv.request('com.webos.service.ime/sendEnterKey');
+      return launchApp('com.webos.app.livetv');
+    case 'ytInfo': // diagnóstico de solo lectura: cómo declara la app de YouTube sus deep links
+      ytInfoCache = null;
+      return youtubeAppInfo();
+    case 'foreground':
+      return { appId: await foregroundApp() };
+    case 'text': {
+      const text = String(a.text || '');
+      if (!text) throw new Error('texto vacío');
+      // a.mode: 'auto' (por defecto) | 'ime' | 'youtube'
+      const mode = a.mode || 'auto';
+      const fg = mode === 'ime' ? null : await foregroundApp();
+      if (mode === 'youtube' || (mode === 'auto' && isYouTube(fg))) return youtubeSearch(text, fg, a.variant);
+      await tv.request('com.webos.service.ime/insertText', { text, replace: 0 });
+      return { via: 'ime', foreground: fg };
+    }
+    case 'enter': {
+      // En YouTube (teclado propio de la app) sendEnterKey no hace nada: se pulsa OK por el pointer socket.
+      const fg = await foregroundApp();
+      if (isYouTube(fg)) { await tv.button('ENTER'); return { via: 'pointer', foreground: fg }; }
+      try { return { via: 'ime', ...(await tv.request('com.webos.service.ime/sendEnterKey')) }; } catch (_) { await tv.button('ENTER'); return { via: 'pointer' }; }
+    }
     case 'delete':
       return tv.request('com.webos.service.ime/deleteCharacters', { count: Math.max(1, Math.min(200, Number(a.count) || 1)) });
     case 'move':
@@ -207,6 +399,7 @@ function sendJson(res, code, obj) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/api/status') return sendJson(res, 200, publicStatus());
+  if (url.pathname === '/api/log') return sendJson(res, 200, { errors: errLog });
   if (url.pathname === '/api/action' && req.method === 'POST') {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
@@ -215,6 +408,7 @@ const server = http.createServer((req, res) => {
         const data = await doAction(JSON.parse(body || '{}'));
         sendJson(res, 200, { ok: true, data });
       } catch (e) {
+        log('acción fallida', body.slice(0, 200), '->', e.message);
         sendJson(res, 200, { ok: false, error: e.message });
       }
     });
@@ -245,6 +439,7 @@ wss.on('connection', (c) => {
       const data = await doAction(msg);
       if (msg.id !== undefined) c.send(JSON.stringify({ id: msg.id, ok: true, data }));
     } catch (e) {
+      if (msg.type !== 'move' && msg.type !== 'scroll') log('acción fallida', msg.type, '->', e.message);
       if (msg.id !== undefined) c.send(JSON.stringify({ id: msg.id, ok: false, error: e.message }));
     }
   });

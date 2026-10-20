@@ -67,6 +67,7 @@ nano config.json
 | `host` | `HOST` | `0.0.0.0` | Interfaz de escucha (`127.0.0.1` = solo este móvil) |
 | `port` | `PORT` | `8765` | Puerto de la página |
 | `wolAddresses` | `WOL_ADDRESSES` | `255.255.255.255, 192.168.1.255, IP tele` | Destinos del paquete mágico |
+| `ytSearch` | `YT_SEARCH` | `auto` | Formato de búsqueda en YouTube: `url`, `hash`, `q` o plantilla con `{q}` (ver “Texto y YouTube”) |
 
 Ejemplo sin fichero: `TV_IP=192.168.1.50 node server.js`.
 
@@ -130,7 +131,7 @@ Decisión actual: se enciende con el botón físico o el mando; el botón WoL qu
 | Vol +/− (mantener = repetir) | `ssap://audio/volumeUp` / `volumeDown` |
 | Silencio | `ssap://audio/setMute` alternando (estado de `audio/getVolume`); si falla, tecla `MUTE` |
 | CH +/− | `ssap://tv/channelUp` / `channelDown` |
-| Entrada | `ssap://tv/getExternalInputList` → lista → `ssap://tv/switchInput {inputId}` (+ “TV”) |
+| Entrada | `ssap://tv/getExternalInputList` (si falla: apps HDMI/AV de `listLaunchPoints`/`listApps`) → `ssap://tv/switchInput {inputId}` (si falla: `system.launcher/launch com.webos.app.hdmiN`) (+ “TV”) |
 | Live TV | `ssap://system.launcher/launch {id: com.webos.app.livetv}` |
 | ▲ ▼ ◀ ▶ OK, Atrás, Inicio, Salir | pointer socket: `UP DOWN LEFT RIGHT ENTER BACK HOME EXIT` |
 | Ajustes, Q.MENU, Guía, Info, Lista | pointer socket: `MENU QMENU GUIDE INFO LIST` |
@@ -139,8 +140,9 @@ Decisión actual: se enciende con el botón físico o el mando; el botón WoL qu
 | ⏪ ▶ ⏸ ⏹ ⏩ | `ssap://media.controls/rewind\|play\|pause\|stop\|fastForward`; si falla, teclas `REWIND PLAY PAUSE STOP FASTFORWARD` |
 | Más teclas | `CC` (subtítulos), `SAP` (audio), `TELETEXT`, `TEXTOPTION`, `ASPECT_RATIO`, `AD`, `3D_MODE`, `RECORD`, `PROGRAM`, `MYAPPS`, `RECENT`, `ASTERISK`, `POWER`, `NETFLIX`; Pantalla off/on (`com.webos.service.tv.power/turnOffScreen` en webOS < 4) |
 | Touchpad | pointer socket `type:move dx dy`, toque = `type:click`, dos dedos = `type:scroll` |
-| Texto | `ssap://com.webos.service.ime/insertText`, `sendEnterKey`, `deleteCharacters` (con un campo de texto abierto en la tele) |
-| Apps | `listLaunchPoints` → `system.launcher/launch` |
+| Texto | `ssap://com.webos.service.ime/insertText`, `sendEnterKey`, `deleteCharacters` (campo de texto del sistema abierto). Con YouTube delante: búsqueda por deep link (abajo) e Intro = tecla OK |
+| Buscar en YouTube | `system.launcher/launch {id: youtube.leanback.v4, params: {contentTarget: …}}` |
+| Apps | `listLaunchPoints` (si falla: `listApps`) → `system.launcher/launch` |
 | Aviso de prueba | `ssap://system.notifications/createToast` |
 
 Al pulsar, el móvil vibra (`navigator.vibrate`). Volumen, canales y flechas se repiten manteniendo pulsado.
@@ -158,6 +160,35 @@ Podrían no hacer nada en webOS 2.0 (vienen de listas de modelos más nuevos): `
 `TELETEXT`, `TEXTOPTION`, `ASPECT_RATIO`, `AD`, `3D_MODE` (la 32LF592 no es 3D), `RECORD`, `MYAPPS`, `RECENT`, `NETFLIX`, `POWER`.
 Una tecla desconocida simplemente se ignora. No hay tecla “INPUT” en esas listas (por eso Entrada usa la lista de entradas;
 `INPUT_HUB` existe pero es de modelos recientes). `DASH` es el guion del teclado numérico.
+
+### Texto y YouTube (limitaciones)
+
+- El envío de texto usa el IME del sistema (`com.webos.service.ime/insertText`). Funciona en campos del
+  sistema (LG Store, navegador, buscador de LG…), **no en la app de YouTube** de webOS 2: esa app dibuja
+  su propio teclado en pantalla y no escucha el IME (la tele responde OK pero no aparece nada). El pointer
+  socket tampoco tiene teclas de letras (solo flechas, OK, números…).
+- Por eso, si la app en primer plano (`getForegroundAppInfo`) es YouTube, el texto se envía como
+  **búsqueda** relanzando YouTube con `params.contentTarget`. Formatos (selector junto a “Buscar en YouTube”):
+  - `url` → `https://www.youtube.com/tv?launch=search&q=…` — la app web antigua (webOS 1-3) usa como deep
+    link la URL completa (`"contentTarget":"https://www.youtube.com/tv?v=$CONTENTID"`, igual que lgtv2 /
+    LGWebOSRemote / ConnectSDK, que usa `?launch=search&v=`).
+  - `hash` → `https://www.youtube.com/tv#/search?q=…` (ruta interna de youtube.com/tv).
+  - `q` → `q=…` — es el `inAppSearchParams` oficial de la app Cobalt de webOS 4+ (`"contentTarget":"q=$SEARCH_KEYWORD"`).
+  - `auto` (por defecto) lee `deeplinkingParams`/`inAppSearchParams` que la propia tele da en `listApps`
+    y elige; en esta tele debería resultar `url`. Diagnóstico: `curl -X POST -d '{"type":"ytInfo"}' http://127.0.0.1:8765/api/action`.
+  Ninguno está probado en esta tele concreta: si `auto` solo abre YouTube sin buscar, prueba `hash` y `q`.
+- Navegar automáticamente el teclado en pantalla de YouTube con flechas/OK **no está implementado**: la
+  posición inicial del cursor y la distribución del teclado cambian entre versiones de la app, y un paso
+  perdido escribe basura. Como último recurso se puede usar el touchpad/flechas + OK a mano.
+- `Intro` con YouTube delante pulsa OK por el pointer socket; `Borrar` (deleteCharacters) no afecta al
+  teclado propio de YouTube.
+
+### Errores de la tele
+
+Cada petición SSAP fallida se escribe en la consola de Termux (`ERROR TV ssap://… -> 500 Application error {…}`
+con la respuesta cruda) y las últimas 50 se ven en `http://127.0.0.1:8765/api/log`. Los `500 Application error`
+de webOS 2 son fallos del servicio de la tele (a menudo transitorios o según la app en primer plano): se
+reintenta una vez y después se usan las alternativas de la tabla.
 
 ## 7. Estructura
 
@@ -192,5 +223,6 @@ TV_IP=127.0.0.1 node server.js   # y abre http://127.0.0.1:8765
 - **Desconectado · ECONNREFUSED / EHOSTUNREACH / ETIMEDOUT**: tele apagada, IP cambiada o el móvil en otra red.
 - **No sale el aviso**: activa *LG Connect Apps*; borra `tv-state.json` y reinicia.
 - **Emparejamiento rechazado**: se pulsó “Rechazar”; reintentará solo.
-- **El texto no aparece**: tiene que haber un campo de texto con el teclado de la tele abierto.
+- **El texto no aparece**: tiene que haber un campo de texto del sistema con el teclado de la tele abierto. En YouTube se envía como búsqueda (ver “Texto y YouTube”).
+- **“500 Application error” en Entrada/Apps**: mira `/api/log` y la consola; se reintenta y se usan alternativas automáticamente.
 - **Desde la tablet no carga**: misma Wi-Fi, y usa la IP del móvil que muestra Termux.
