@@ -49,6 +49,21 @@ function createMockTv({ port = 0, promptDelay = 300, key = 'MOCK-CLIENT-KEY-1234
       { id: 'com.webos.app.oculto', title: 'Oculta', visible: false }] }),
     'ssap://com.webos.applicationManager/getForegroundAppInfo': () => ({ appId: state.foreground, windowId: '', processId: '' }),
     'ssap://system.launcher/launch': (p) => { state.launched.push(p); state.foreground = p.id; if (/^com\.webos\.app\.hdmi(\d)$/.test(p.id)) state.input = 'HDMI_' + RegExp.$1; return { id: p.id }; },
+    'ssap://system.launcher/open': (p) => { state.opened = p.target; state.foreground = 'com.webos.app.browser'; return { id: 'com.webos.app.browser' }; },
+    'ssap://system.launcher/close': (p) => { state.closedApp = p.id; return {}; },
+    'ssap://media.viewer/open': (p) => {
+      state.media = p;
+      state.foreground = 'com.webos.app.tvsimpleviewer';
+      state.playing = 'play';
+      return { id: 'com.webos.app.tvsimpleviewer', sessionId: 'sess-mock' };
+    },
+    'ssap://media.viewer/close': (p) => { state.closed = p; state.media = null; state.playing = 'stop'; return {}; },
+    'ssap://media.controls/play': () => { state.playing = 'play'; return {}; },
+    'ssap://media.controls/pause': () => { state.playing = 'pause'; return {}; },
+    'ssap://media.controls/stop': () => { state.playing = 'stop'; return {}; },
+    'ssap://media.controls/seek': (p) => { state.seek = p.position; return {}; },
+    'ssap://com.webos.media/getForegroundAppInfo': () => ({ foregroundAppInfo: [{ appId: state.foreground, mediaId: 'media-1', playState: state.playing || 'playing' }] }),
+    'ssap://com.webos.media/seek': (p) => { state.seek = p.position; state.seekId = p.mediaId; return { mediaId: p.mediaId }; },
   };
 
   wss.on('connection', (ws) => {

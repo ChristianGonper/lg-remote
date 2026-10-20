@@ -27,13 +27,14 @@
   }
 
   function send(action, quiet) {
+    const waitMs = action && (action.type === 'cast' || action.type === 'castControl') ? 20000 : 8000;
     return new Promise((resolve) => {
       const done = (m) => { if (!m.ok && !quiet) toast('⚠️ ' + m.error); resolve(m); };
       if (ws && ws.readyState === 1) {
         const id = ++seq;
         waiting.set(id, done);
         ws.send(JSON.stringify({ ...action, id }));
-        setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); done({ ok: false, error: 'sin respuesta' }); } }, 8000);
+        setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); done({ ok: false, error: 'sin respuesta' }); } }, waitMs);
       } else {
         fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action) })
           .then((r) => r.json()).then(done).catch((e) => done({ ok: false, error: 'servidor no disponible' }));
@@ -53,6 +54,11 @@
     $('#promptBanner').classList.toggle('hidden', st !== 'prompt');
     const v = status.volume;
     $('#volText').textContent = v && v.volume !== undefined ? (v.muted ? '🔇 ' : '🔊 ') + v.volume : '';
+    const lan = $('#castLan');
+    if (lan) {
+      const port = location.port ? ':' + location.port : '';
+      lan.textContent = status.castHost ? 'La tele usará http://' + status.castHost + port + '/… (IPv4, la misma Wi-Fi).' : '';
+    }
   }
 
   function toast(msg, ms = 2500) {
@@ -171,6 +177,8 @@
         <span>Emparejado</span><span>${s.paired ? 'Sí (client-key guardada)' : 'No'}</span>
         <span>MAC (WoL)</span><span>${esc((s.macs || []).join(', ') || 'ninguna')} <small>(${esc(s.macSource)})</small></span>
         <span>Último WoL</span><span>${esc(lw)}</span>
+        <span>IP para la tele</span><span>${esc(s.castHost || '—')}</span>
+        <span>Último envío</span><span>${esc(s.cast ? (s.cast.viaLabel || s.cast.via) + ' · ' + (s.cast.title || '') : '—')}</span>
       </div>
       <div class="row r2">
         <button class="b sm" id="btnRecon">Reconectar</button>
@@ -246,6 +254,112 @@
   };
   pad.addEventListener('pointerup', end);
   pad.addEventListener('pointercancel', end);
+
+  // ---------- Enviar a la tele ----------
+  const fileIn = $('#fileIn');
+  let picked = null;
+  const bytesOf = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
+  $('#castMethod').value = localStorage.getItem('castMethod') || 'auto';
+  $('#castYt').value = localStorage.getItem('castYt') || 'auto';
+  $('#castDry').checked = localStorage.getItem('castDry') === '1';
+  $('#castMethod').addEventListener('change', (e) => localStorage.setItem('castMethod', e.target.value));
+  $('#castYt').addEventListener('change', (e) => localStorage.setItem('castYt', e.target.value));
+  $('#castDry').addEventListener('change', (e) => localStorage.setItem('castDry', e.target.checked ? '1' : '0'));
+
+  function castOptions() {
+    return { method: $('#castMethod').value, variant: $('#castYt').value, dryRun: $('#castDry').checked };
+  }
+  function showCast(r) {
+    const box = $('#castState');
+    if (!r.ok) { box.textContent = r.error || 'No se pudo enviar'; return; }
+    const d = r.data || {};
+    if (d.dryRun) {
+      const lines = (d.steps || []).map((s, i) => {
+        const p = s.payload || {};
+        const nested = p.params && p.params.payload && p.params.payload[0];
+        const dest = (p.params && p.params.contentTarget) || p.target || (nested && nested.fullPath) || '';
+        return (i + 1) + '. ' + s.via + (dest ? '\n   ' + dest : '');
+      });
+      box.textContent = 'Simulación, no se ha enviado nada.\n' + lines.join('\n');
+      toast('Simulación: ' + (d.steps || []).map((s) => s.via).join(' → '), 4000);
+      return;
+    }
+    box.textContent = (d.title || 'Medio') + '\n' + (d.viaLabel || d.via || '') + (d.contentTarget ? '\n' + d.contentTarget : '') + '\n' + (d.url || '');
+    toast('Enviado por ' + (d.viaLabel || d.via) + (d.warning ? '. ' + d.warning : ''), d.warning ? 5000 : 2500);
+  }
+
+  $('#castForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = $('#castUrl').value.trim();
+    if (!url) return toast('Pega primero una URL');
+    buzz();
+    const btn = e.submitter || $('#castForm button');
+    if (btn) btn.disabled = true;
+    $('#castState').textContent = 'Enviando…';
+    const r = await send({ type: 'cast', url, ...castOptions() });
+    if (btn) btn.disabled = false;
+    showCast(r);
+  });
+
+  $('#filePick').addEventListener('click', () => fileIn.click());
+  fileIn.addEventListener('change', () => {
+    picked = fileIn.files && fileIn.files[0];
+    $('#fileMeta').textContent = picked ? picked.name + ' · ' + bytesOf(picked.size) : '';
+    $('#fileSend').disabled = !picked;
+  });
+
+  function uploadFile(file) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      const prog = $('#fileProg');
+      xhr.open('PUT', '/api/cast/upload?name=' + encodeURIComponent(file.name));
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        prog.classList.remove('hidden');
+        prog.firstElementChild.style.width = Math.round(ev.loaded / ev.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        prog.classList.add('hidden');
+        try { resolve(JSON.parse(xhr.responseText)); } catch (_) { resolve({ ok: false, error: 'respuesta inválida' }); }
+      };
+      xhr.onerror = () => { prog.classList.add('hidden'); resolve({ ok: false, error: 'no se pudo subir el archivo' }); };
+      xhr.send(file);
+    });
+  }
+
+  $('#fileSend').addEventListener('click', async () => {
+    if (!picked) return toast('Elige primero un archivo');
+    buzz();
+    $('#fileSend').disabled = true;
+    $('#castState').textContent = 'Subiendo ' + picked.name + '…';
+    const up = await uploadFile(picked);
+    if (!up.ok) {
+      $('#fileSend').disabled = false;
+      $('#castState').textContent = up.error || 'No se pudo subir';
+      return toast('⚠️ ' + (up.error || 'no se pudo subir'));
+    }
+    $('#castState').textContent = 'Enviando a la tele…';
+    const r = await send({ type: 'cast', url: up.data.url, title: picked.name, mime: up.data.mime, bytes: up.data.bytes, ...castOptions() });
+    $('#fileSend').disabled = false;
+    showCast(r);
+  });
+
+  async function castCmd(cmd, extra) {
+    buzz();
+    const r = await send({ type: 'castControl', cmd, ...extra });
+    if (r.ok && cmd === 'seek') toast('Salto a ' + Math.round(r.data.position / 1000) + ' s (' + r.data.via + ')');
+    if (r.ok && cmd === 'stop') { toast('Parado'); $('#castState').textContent = 'Parado'; }
+  }
+  $('#castPlay').addEventListener('click', () => castCmd('play'));
+  $('#castPause').addEventListener('click', () => castCmd('pause'));
+  $('#castStop').addEventListener('click', () => castCmd('stop'));
+  $('#seekForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const seconds = Number($('#seekSec').value);
+    if (!Number.isFinite(seconds) || seconds < 0) return toast('Escribe el segundo');
+    castCmd('seek', { seconds });
+  });
 
   renderStatus();
   connectWs();

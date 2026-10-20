@@ -194,7 +194,7 @@ function startServer(tvPort, wolPort) {
 
     console.log('7) UI');
     const html = await fetch(`http://127.0.0.1:${HTTP_PORT}/`).then((r) => r.text());
-    assert.ok(html.includes('<title>Mando LG</title>') && html.includes('data-btn="ENTER"'));
+    assert.ok(html.includes('<title>Mando LG</title>') && html.includes('data-btn="ENTER"') && html.includes('data-tab="enviar"'));
     for (const f of ['app.js', 'style.css', 'manifest.webmanifest', 'icon.svg']) assert.equal((await fetch(`http://127.0.0.1:${HTTP_PORT}/${f}`)).status, 200, f);
     assert.equal((await fetch(`http://127.0.0.1:${HTTP_PORT}/../server.js`)).status, 404);
     ok('index.html y recursos se sirven');

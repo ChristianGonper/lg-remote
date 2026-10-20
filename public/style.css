@@ -13,8 +13,8 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;touch-action:manipulat
 .icon{background:var(--card);width:42px;height:42px;border-radius:50%;font-size:20px}
 .banner{background:#3b3311;color:#ffe9a6;border-radius:12px;padding:12px;margin-bottom:8px;font-size:15px}
 .hidden{display:none!important}
-.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--card);border-radius:14px;padding:4px;margin-bottom:10px}
-.tab{background:none;padding:10px 2px;border-radius:10px;font-size:14px;color:var(--mut)}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:var(--card);border-radius:14px;padding:4px;margin-bottom:10px}
+.tab{background:none;padding:10px 1px;border-radius:10px;font-size:12px;color:var(--mut);white-space:nowrap}
 .tab.active{background:var(--b2);color:var(--fg)}
 .page{display:none}.page.active{display:block}
 .row{display:grid;gap:8px;margin:8px 0}
@@ -54,6 +54,13 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;touch-action:manipulat
 .sheet-card{background:var(--card);width:100%;max-width:520px;max-height:80vh;overflow:auto;border-radius:18px 18px 0 0;padding:14px 14px calc(env(safe-area-inset-bottom) + 18px)}
 .sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:18px}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:14px;margin-bottom:12px}.kv span:nth-child(odd){color:var(--mut)}
-.note{color:var(--mut);font-size:13px;line-height:1.4}
+.note{color:var(--mut);font-size:13px;line-height:1.4;word-break:break-word}
+.note.break{word-break:break-all}
+.b:disabled{opacity:.45}
+.progress{height:8px;background:var(--b);border-radius:8px;overflow:hidden;margin:6px 0}
+.progress>div{height:100%;width:0;background:var(--acc)}
+#castState{white-space:pre-wrap}
+.cast-dry{display:flex;gap:8px;align-items:center}
+.cast-dry input{width:18px;height:18px;accent-color:var(--acc)}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#333;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;z-index:20;max-width:90vw}
 select.b{appearance:none;-webkit-appearance:none;font-size:13px;text-align:center;font-family:inherit}

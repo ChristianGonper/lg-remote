@@ -7,7 +7,8 @@ y sirve una página táctil en `http://127.0.0.1:8765` que imita el mando LG.
 - Una sola dependencia: [`ws`](https://github.com/websockets/ws) (ya incluida en `node_modules/`, JavaScript puro: no hace falta compilar nada).
 - Empareja una vez (aviso en la tele) y guarda la *client-key* en `tv-state.json`, junto al script.
 - Reconexión automática; la página muestra **Conectado / Esperando aceptar en la TV / Desconectado** y el volumen.
-- Escucha en `0.0.0.0:8765`, así que la tablet puede usar el servidor del móvil (`http://IP-del-móvil:8765`).
+- Escucha en `0.0.0.0:8765` (solo IPv4: el kernel de esta tele no tiene IPv6), así que la tablet puede usar el servidor del móvil (`http://IP-del-móvil:8765`).
+- La pestaña **Enviar** manda un enlace o un archivo del móvil a la tele (vídeo, foto o audio). No duplica la pantalla.
 
 ## 1. Instalación en Termux
 
@@ -68,6 +69,11 @@ nano config.json
 | `port` | `PORT` | `8765` | Puerto de la página |
 | `wolAddresses` | `WOL_ADDRESSES` | `255.255.255.255, 192.168.1.255, IP tele` | Destinos del paquete mágico |
 | `ytSearch` | `YT_SEARCH` | `auto` | Formato de búsqueda en YouTube: `url`, `hash`, `q` o plantilla con `{q}` (ver “Texto y YouTube”) |
+| `castHost` | `CAST_HOST` | (vacío = autodetectar) | IPv4 que la tele usa para bajar archivos. Si está vacío se elige la IPv4 de esta máquina que está en la misma subred /24 que la tele (`192.168.1.34` si la tele es `192.168.1.39`) |
+| `castMaxMb` | `CAST_MAX_MB` | `2048` | Tamaño máximo de un archivo subido desde el móvil |
+| `castDir` | `CAST_DIR` | temporal del sistema | Carpeta de esos archivos (uno cada vez; se borran a las `castTtlHours`) |
+| `castTtlHours` | `CAST_TTL_HOURS` | `12` | Horas que se conserva el archivo servido |
+| `castDryRun` | `CAST_DRY_RUN` | `false` | `true` = la pestaña Enviar calcula los mensajes SSAP pero no los manda |
 
 Ejemplo sin fichero: `TV_IP=192.168.1.50 node server.js`.
 
@@ -190,33 +196,100 @@ con la respuesta cruda) y las últimas 50 se ven en `http://127.0.0.1:8765/api/l
 de webOS 2 son fallos del servicio de la tele (a menudo transitorios o según la app en primer plano): se
 reintenta una vez y después se usan las alternativas de la tabla.
 
-## 7. Estructura
+## 7. Enviar a la tele (vídeo, foto o audio)
+
+No es duplicar la pantalla ni usar el Chromecast. La tele **descarga** un enlace http(s) o un archivo que el móvil sirve por la Wi-Fi, y lo abre con su reproductor (o con la app de YouTube). Hace falta que el móvil y la tele estén en la misma red y que el router no aísle los clientes Wi-Fi.
+
+En la pestaña **Enviar**:
+
+1. **URL.** Pega un enlace directo (`mp4`, `mp3`, `jpg`, `m3u8`…) y pulsa Enviar. Un enlace de YouTube (`youtube.com`, `youtu.be`, Shorts, una lista) **no** pasa por el reproductor: se abre `youtube.leanback.v4`.
+2. **Archivo del móvil.** Eliges un vídeo, una foto o un audio. El navegador lo sube al Node de Termux (`PUT /api/cast/upload`) y la tele lo pide por HTTP. La respuesta acepta `Range: bytes=` para que el reproductor pueda saltar. Solo se guarda el último archivo (por defecto hasta 2 GB, 12 horas, en el temporal del sistema).
+3. **Controles.** Play, pausa y stop usan `ssap://media.controls/play|pause|stop` (si fallan, la tecla del pointer socket; stop además cierra el visor o SmartShare). «Ir» intenta un salto al segundo indicado.
+
+Arriba de la pestaña se muestra la IPv4 que verá la tele, por ejemplo `http://192.168.1.34:8765/…`. Si esa IP no es la de la Wi-Fi, fíjala con `CAST_HOST` (tiene que ser IPv4). Para comprobar que el móvil sirve el archivo, abre esa URL en otro aparato de la misma red antes de culpar a la tele.
+
+**Método** (por si el automático abre la app equivocada):
+
+| Orden | SSAP | Cuándo |
+|---|---|---|
+| 1 | `ssap://media.viewer/open` `{target, title, mimeType, loop:false}` | El que usa ConnectSDK en webOS 2 (el second-screen anuncia versión 4.0.0/4.0.1). La tele suele responder `{id:"com.webos.app.tvsimpleviewer", sessionId}` |
+| 2 | `ssap://system.launcher/launch` de `com.webos.app.smartshare` con el payload DLNA (`fullPath`, `mediaType` VIDEO/AUDIO/IMAGE, `protocolInfo` con `DLNA.ORG_OP=01`) | Reproductor de webOS 1.x–2.x. Solo si el paso 1 falla |
+| 3 | El mismo payload con `com.webos.app.photovideo` | Nombre del reproductor en webOS 3–5, por si este firmware lo usa |
+| 4 | `ssap://system.launcher/open` `{target}` y, si falla, `com.webos.app.browser` | Navegador. Último recurso |
+
+YouTube, en automático, lanza `youtube.leanback.v4` con `params.contentTarget`. En esta tele la app vieja declara `https://www.youtube.com/tv?v=$CONTENTID` (se lee de `listApps` → `deeplinkingParams`). Si ese lanzamiento falla se prueban `v=ID` y `https://www.youtube.com/watch?v=ID`. El desplegable de la pestaña fuerza uno de los tres. Una búsqueda (`/results?search_query=`) usa el mismo deep link de búsqueda que la pestaña Texto.
+
+`media.controls` documentado en el SSAP público: play, pause, stop, rewind, fastForward. **No incluye seek.** Aun así «Ir» prueba `ssap://media.controls/seek` `{position}` en milisegundos y, si la tele lo rechaza, `ssap://com.webos.media/getForegroundAppInfo` + `ssap://com.webos.media/seek` `{position, mediaId}`. Esa segunda llamada es un servicio interno y en webOS 2 puede no estar expuesto. Si las dos fallan, el mensaje lo dice: usa ⏪ y ⏩ del mando.
+
+Formatos que esta tele de 2015 tiene más números de tragar: MP4 H.264 + AAC, MP3 y JPEG. MKV/AVI dependen del reproductor. HEVC, VP9 y WebM es fácil que no suenen. Un `m3u8` (HLS) se manda como `application/vnd.apple.mpegurl`, pero **no está confirmado** que el visor de webOS 2 lo reproduzca.
+
+La casilla **Probar sin tele** (o `CAST_DRY_RUN=1`) construye los mensajes y no los envía. Equivale a:
+
+```sh
+curl -s -X POST http://127.0.0.1:8765/api/action -H 'Content-Type: application/json' \
+  -d '{"type":"cast","url":"http://example.com/video.mp4","dryRun":true}'
+```
+
+Con la tele de verdad:
+
+```sh
+curl -s -X PUT 'http://127.0.0.1:8765/api/cast/upload?name=clip.mp4' \
+  -H 'Content-Type: video/mp4' --data-binary @clip.mp4
+# la respuesta trae data.url (http://192.168.1.34:8765/cast/…/clip.mp4)
+curl -s -X POST http://127.0.0.1:8765/api/action -H 'Content-Type: application/json' \
+  -d '{"type":"cast","url":"http://192.168.1.34:8765/cast/TOKEN/clip.mp4","mime":"video/mp4","bytes":12345}'
+curl -s -X POST http://127.0.0.1:8765/api/action -H 'Content-Type: application/json' \
+  -d '{"type":"castControl","cmd":"seek","seconds":30}'
+```
+
+`GET /api/cast` lista la IPv4 anunciada y el archivo que hay ahora mismo.
+
+### Qué hay que comprobar en la tele real
+
+Desde aquí no se llega a `192.168.1.39`. `npm test` cubre el servidor de rangos y el armado de los mensajes contra una tele falsa. En el salón falta ver:
+
+1. Que un MP4, un MP3 y un JPEG servidos por el móvil (no un `127.0.0.1`) se ven y se oyen. Mira en Termux qué `via` ganó: `media.viewer/open` o `smartshare`.
+2. Si el automático «acierta» en SSAP pero la pantalla no cambia, prueba a mano SmartShare y luego el navegador.
+3. Arrastrar la barra de tiempo del reproductor de la tele contra un archivo local: tiene que pedir `Range` (en el log de Termux no se ve cada petición; desde otro móvil, `curl -D- -H 'Range: bytes=0-100' URL`).
+4. Play / pausa / stop mientras ese medio está abierto.
+5. «Ir» al segundo 30. Si `/api/log` muestra `404` o `500` en `media.controls/seek` y en `com.webos.media/seek`, este firmware no deja saltar por SSAP.
+6. Un enlace `https://www.youtube.com/watch?v=…` abre el vídeo y no solo el inicio de la app. Si no, cambia el desplegable a `v=` o a `watch?v=`.
+7. Un `m3u8` de prueba, sabiendo que puede no funcionar.
+8. Un archivo grande (cientos de MB) no lo mata Android a medias: `start.sh` ya toma el wake-lock; la tele tiene que poder hablar con el móvil (sin aislamiento de clientes).
+
+## 8. Estructura
 
 ```
 lg-remote/
-├── server.js            servidor HTTP + WebSocket (/ws) + API (/api/status, /api/action)
+├── server.js            servidor HTTP + WebSocket (/ws) + API (/api/status, /api/action, /api/cast)
 ├── start.sh             arranque para Termux (wake-lock)
 ├── lib/lgtv.js          cliente SSAP: registro, client-key, reconexión, keepalive, pointer socket
+├── lib/cast.js          mensajes SSAP para enviar un medio o un enlace de YouTube, y el orden de reserva
+├── lib/cast-http.js     subida del archivo y HTTP con Range, solo IPv4
 ├── lib/wol.js           Wake-on-LAN sin dependencias
 ├── lib/pairing.json     manifest de emparejamiento estándar (firmado) de lgtv2
 ├── public/              index.html, app.js, style.css, manifest + iconos (UI)
 ├── test/mock-tv.js      tele falsa SSAP (node test/mock-tv.js 3000)
-├── test/run-test.js     prueba de extremo a extremo (npm test)
+├── test/cast-test.js    rangos HTTP y mensajes SSAP de envío, sin tele real
+├── test/run-test.js     prueba de extremo a extremo del mando (npm test)
 ├── config.example.json
 └── node_modules/ws      dependencia incluida
 ```
 
 API para scripts: `curl -X POST http://127.0.0.1:8765/api/action -d '{"type":"button","name":"HOME"}'`
 (tipos: `button`, `ssap` {cmd: volumeUp|volumeDown|channelUp|channelDown|powerOff|toast}, `media`, `mute`, `inputs`, `input`,
-`liveTv`, `apps`, `launch`, `text`, `enter`, `delete`, `move`, `click`, `scroll`, `screenOff`, `screenOn`, `powerOn`, `reconnect`, `status`).
+`liveTv`, `apps`, `launch`, `text`, `enter`, `delete`, `move`, `click`, `scroll`, `screenOff`, `screenOn`, `powerOn`, `reconnect`, `status`,
+`cast` {url, method?, variant?, dryRun?, mime?, bytes?, title?}, `castControl` {cmd: play|pause|stop|seek, seconds?}).
 
-## 8. Pruebas sin tele
+## 9. Pruebas sin tele
 
 ```sh
-npm test                         # arranca una tele falsa y comprueba emparejamiento, key, botones, URIs, WoL, reconexión
+npm test                         # cast-test (rangos y SSAP) y, después, la tele falsa del mando
 node test/mock-tv.js 3000 &      # tele falsa manual
 TV_IP=127.0.0.1 node server.js   # y abre http://127.0.0.1:8765
 ```
+
+`test/cast-test.js` no habla con ninguna tele de verdad. Comprueba el orden de los mensajes (`media.viewer/open`, SmartShare, YouTube), el seek de reserva y que un `GET` con `Range` devuelve 206 con el trozo pedido. Con la tele falsa en marcha, la casilla «Probar sin tele» de la pestaña Enviar hace lo mismo desde el móvil.
 
 ## Problemas frecuentes
 
@@ -226,3 +299,7 @@ TV_IP=127.0.0.1 node server.js   # y abre http://127.0.0.1:8765
 - **El texto no aparece**: tiene que haber un campo de texto del sistema con el teclado de la tele abierto. En YouTube se envía como búsqueda (ver “Texto y YouTube”).
 - **“500 Application error” en Entrada/Apps**: mira `/api/log` y la consola; se reintenta y se usan alternativas automáticamente.
 - **Desde la tablet no carga**: misma Wi-Fi, y usa la IP del móvil que muestra Termux.
+- **La tele no abre el archivo**: la URL tiene que ser la IPv4 de la Wi-Fi (la pestaña Enviar la muestra), no `127.0.0.1`. Misma red, sin aislamiento de clientes. `GET /api/cast` enseña la IP que se está anunciando; cámbiala con `CAST_HOST` si hace falta.
+- **Se abre la app pero no hay imagen**: prueba otro método en el desplegable (SmartShare o navegador) y mira `/api/log`. Un MP4 H.264 cabe; HEVC o WebM en esta tele de 2015 es muy posible que no.
+- **YouTube solo abre la portada**: cambia el formato del enlace (`tv?v=`, `v=`, `watch?v=`) y vuelve a enviar.
+- **El salto no hace nada**: en webOS 2 seek no está en la lista pública de SSAP. El error queda en `/api/log`; mientras tanto, ⏪ y ⏩.

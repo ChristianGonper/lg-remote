@@ -26,7 +26,8 @@
   <button class="tab active" data-tab="mando">Mando</button>
   <button class="tab" data-tab="numeros">Números</button>
   <button class="tab" data-tab="touch">Touchpad</button>
-  <button class="tab" data-tab="texto">Texto / Apps</button>
+  <button class="tab" data-tab="texto">Texto</button>
+  <button class="tab" data-tab="enviar">Enviar</button>
 </nav>
 
 <main>
@@ -168,6 +169,50 @@
   </div>
   <div class="row r1"><button class="b" data-act="apps">Cargar lista de apps</button></div>
   <div class="list" id="appsList"></div>
+</section>
+
+<!-- ===================== ENVIAR (CAST) ===================== -->
+<section class="page" id="page-enviar">
+  <p class="hint">Envía un vídeo, una foto o un audio a la tele por la red. No duplica la pantalla: la tele descarga el enlace o el archivo.</p>
+  <p class="hint" id="castLan"></p>
+  <form id="castForm" class="textform">
+    <input id="castUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://…/video.mp4" aria-label="URL del medio" enterkeyhint="send">
+    <button class="b" type="submit">Enviar</button>
+  </form>
+  <p class="hint">Pega un mp4, mp3, jpg o m3u8 directo. Un enlace de YouTube se abre en la app de YouTube de la tele.</p>
+  <input id="fileIn" type="file" class="hidden" accept="video/*,audio/*,image/*,.m3u8,.mp4,.mkv,.avi,.mov,.mp3,.m4a,.aac,.wav,.jpg,.jpeg,.png,.gif,.bmp">
+  <div class="row r1"><button class="b" type="button" id="filePick">Elegir archivo del móvil</button></div>
+  <p class="note" id="fileMeta"></p>
+  <div class="progress hidden" id="fileProg" aria-hidden="true"><div></div></div>
+  <div class="row r1"><button class="b" type="button" id="fileSend" disabled>Enviar archivo a la tele</button></div>
+  <div class="row r1">
+    <select id="castMethod" class="b sm" aria-label="Método de envío">
+      <option value="auto">Método: automático</option>
+      <option value="viewer">Reproductor (media.viewer)</option>
+      <option value="smartshare">SmartShare (webOS 2)</option>
+      <option value="browser">Navegador de la tele</option>
+    </select>
+  </div>
+  <div class="row r1">
+    <select id="castYt" class="b sm" aria-label="Formato del enlace de YouTube">
+      <option value="auto">YouTube: automático</option>
+      <option value="url">YouTube: URL tv?v=</option>
+      <option value="v">YouTube: v=</option>
+      <option value="watch">YouTube: watch?v=</option>
+    </select>
+  </div>
+  <label class="hint cast-dry"><input type="checkbox" id="castDry"> Probar sin tele (no envía el comando)</label>
+  <p class="note" id="castState"></p>
+  <div class="row r3">
+    <button class="b" type="button" id="castPlay">▶<small>Play</small></button>
+    <button class="b" type="button" id="castPause">⏸<small>Pausa</small></button>
+    <button class="b" type="button" id="castStop">⏹<small>Stop</small></button>
+  </div>
+  <form id="seekForm" class="textform">
+    <input id="seekSec" type="number" min="0" max="86400" step="1" inputmode="numeric" placeholder="Segundo" aria-label="Segundo al que saltar">
+    <button class="b" type="submit">Ir</button>
+  </form>
+  <p class="hint">El salto (seek) no está en la lista pública de SSAP de webOS 2: si no hace nada, usa ⏪ y ⏩ del mando. m3u8 solo si el reproductor de esta tele lo admite.</p>
 </section>
 </main>
 
