@@ -84,7 +84,7 @@ Ids de esta tele, en este orden en la fila:
 | Live TV | `com.webos.app.livetv` |
 | Netflix | `netflix` (solo si la lista lo trae; en esta tele no está instalada) |
 | LG Store | `com.webos.app.discovery` |
-| Ajustes | `com.palm.app.settings` (no `com.webos.app.settings`) |
+| Ajustes | `com.palm.app.settings` (no `com.webos.app.settings`). `listLaunchPoints` no lo devuelve en este firmware; el mosaico abre ese id igual. Live TV (`com.webos.app.livetv`) también. |
 | Homebrew Channel | `org.webosbrew.hbchannel` |
 
 También están en la tele, y salen en «Todas»: `com.webos.app.browser`, `com.webos.app.smartshare`, `canal.yomvi`, `com.mitele.app`.
@@ -102,7 +102,7 @@ node launcher/scripts/make-icons.js   # ya deja icon.png, largeIcon.png y splash
 node launcher/scripts/pack-ipk.js
 ```
 
-Sale `launcher/dist/com.christiangonper.launcher_0.1.1_all.ipk` y su sha256.
+Sale `launcher/dist/com.christiangonper.launcher_0.1.2_all.ipk` y su sha256.
 
 Si tienes `ares-package` del SDK, también vale (el resultado debe ser el mismo tipo de ipk):
 
@@ -117,20 +117,20 @@ La tele está rooteada, con Homebrew Channel 0.7.3 y SSH de root por clave. IP d
 Desde el ordenador:
 
 ```sh
-scp launcher/dist/com.christiangonper.launcher_0.1.1_all.ipk root@192.168.1.39:/tmp/
+scp launcher/dist/com.christiangonper.launcher_0.1.2_all.ipk root@192.168.1.39:/tmp/
 ssh root@192.168.1.39
 ```
 
 En la tele, y dejando el comando abierto hasta que el JSON diga `installed` (Ctrl+C después):
 
 ```sh
-luna-send -i luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.1_all.ipk","subscribe":true}'
+luna-send -i luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.2_all.ipk","subscribe":true}'
 ```
 
 Si este `luna-send` de webOS 2 no admite `-i`, la variante de una respuesta es:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.1_all.ipk","subscribe":true}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.2_all.ipk","subscribe":true}'
 ```
 
 Para abrirla sin buscar el icono:
@@ -144,7 +144,7 @@ Si `dev/install` responde que el id no coincide con el del paquete, reintenta co
 Homebrew Channel también instala por su servicio, pero ese camino quiere una URL http(s) y el sha256 que imprime `pack-ipk.js`, no un archivo local:
 
 ```sh
-luna-send -n 1 luna://org.webosbrew.hbchannel.service/install '{"ipkUrl":"https://…/com.christiangonper.launcher_0.1.1_all.ipk","ipkHash":"<sha256>"}'
+luna-send -n 1 luna://org.webosbrew.hbchannel.service/install '{"ipkUrl":"https://…/com.christiangonper.launcher_0.1.2_all.ipk","ipkHash":"<sha256>"}'
 ```
 
 ### Si dev/install dice que hace falta el modo desarrollador
@@ -154,7 +154,7 @@ El root con Homebrew Channel 0.7.3 suele dejarlo activo. Si no, actívalo desde 
 ```sh
 cd /tmp
 rm -rf /tmp/launcher-unpack && mkdir /tmp/launcher-unpack && cd /tmp/launcher-unpack
-ar x /tmp/com.christiangonper.launcher_0.1.1_all.ipk
+ar x /tmp/com.christiangonper.launcher_0.1.2_all.ipk
 tar -xzf data.tar.gz
 mkdir -p /media/developer/apps/usr/palm/applications/com.christiangonper.launcher
 cp -a usr/palm/applications/com.christiangonper.launcher/. /media/developer/apps/usr/palm/applications/com.christiangonper.launcher/
@@ -179,7 +179,7 @@ La vista previa no puede verificar el bus luna ni el mando de verdad. En la 32LF
 4. El botón azul muestra `hbchannel.service/exec` en la lista y `eim/getAllInputStatus` en las entradas. No debe salir «Sin lista de la tele».
 5. Netflix no sale (no está instalada). YouTube abre `youtube.leanback.v4`. Live TV abre `com.webos.app.livetv`.
 6. LG Store abre `com.webos.app.discovery`.
-7. Ajustes abre `com.palm.app.settings`. Homebrew Channel abre `org.webosbrew.hbchannel`.
+7. Ajustes muestra «Sistema» (no «No está en la lista») y abre `com.palm.app.settings` aunque `listLaunchPoints` no lo traiga. Homebrew Channel abre `org.webosbrew.hbchannel`.
 8. HDMI abre `com.webos.app.hdmiN`. AV1 (SCART) abre `externalinput.av1` y AV2 abre `externalinput.av2` (no las dos como «AV»). Componentes abre `externalinput.component`.
 9. El reloj es la hora local. «Cast» sigue en «no disponible»; como mucho se marca la entrada que tiene señal.
 10. Nada de esto modifica el arranque ni el firmware.

@@ -104,6 +104,15 @@ check('Netflix solo si la lista la confirma, y Ajustes es com.palm.app.settings'
   assert.strictEqual(model.resolveCurated([], false).some((t) => t.key === 'netflix'), false);
   const onlyNew = model.resolveCurated([{ id: 'com.webos.app.settings', title: 'Settings' }], true);
   assert.strictEqual(onlyNew.filter((t) => t.key === 'settings')[0].id, 'com.webos.app.settings');
+  const missing = model.resolveCurated([{ id: 'youtube.leanback.v4', title: 'YouTube' }], true);
+  const settings = missing.filter((t) => t.key === 'settings')[0];
+  const live = missing.filter((t) => t.key === 'livetv')[0];
+  assert.strictEqual(settings.id, 'com.palm.app.settings');
+  assert.strictEqual(settings.confirmed, true);
+  assert.strictEqual(settings.subtitle, 'Sistema');
+  assert.strictEqual(live.id, 'com.webos.app.livetv');
+  assert.strictEqual(live.confirmed, true);
+  assert.strictEqual(missing.filter((t) => t.key === 'hb')[0].confirmed, false);
 });
 
 check('listApps oculta lo no visible y normaliza entradas', () => {

@@ -18,6 +18,7 @@
       title: 'Live TV',
       subtitle: 'Antena',
       ids: ['com.webos.app.livetv'],
+      fixed: true,
       color: '#c6a15a'
     },
     {
@@ -40,6 +41,7 @@
       title: 'Ajustes',
       subtitle: 'Sistema',
       ids: ['com.palm.app.settings', 'com.webos.app.settings'],
+      fixed: true,
       color: '#8d8a84'
     },
     {
@@ -123,7 +125,7 @@
         subtitle: spec.subtitle,
         id: found || spec.ids[0],
         color: spec.color,
-        confirmed: !!found
+        confirmed: !!found || !!spec.fixed
       });
     }
     return out;
