@@ -13,6 +13,7 @@ const { LGTV } = require('./lib/lgtv');
 const wol = require('./lib/wol');
 const { createCaster, parseYouTube } = require('./lib/cast');
 const castHttp = require('./lib/cast-http');
+const { createYtAutoOk, parseYtAutoOkMs } = require('./lib/yt-auto-ok');
 
 const DIR = __dirname;
 
@@ -41,6 +42,10 @@ function loadConfig() {
     castDir: env.CAST_DIR || file.castDir || path.join(os.tmpdir(), 'lg-remote-cast'),
     castTtlHours: Number(env.CAST_TTL_HOURS || file.castTtlHours) || 12,
     castDryRun: bool(env.CAST_DRY_RUN) ?? file.castDryRun ?? false,
+    ytAutoOkMs: parseYtAutoOkMs(
+      env.YT_AUTO_OK_MS !== undefined && env.YT_AUTO_OK_MS !== '' ? env.YT_AUTO_OK_MS : file.ytAutoOkMs,
+      18000,
+    ),
   };
   if (!cfg.wolAddresses) cfg.wolAddresses = ['255.255.255.255', wol.subnetBroadcast(cfg.tvIp), cfg.tvIp].filter(Boolean);
   if (!path.isAbsolute(cfg.stateFile)) cfg.stateFile = path.join(DIR, cfg.stateFile);
@@ -123,6 +128,7 @@ function publicStatus() {
     lastWol: live.lastWol,
     castHost: advertiseHost(),
     cast: publicCast(),
+    ytAutoOk: ytOk ? ytOk.snapshot() : { phase: 'idle', sent: false },
   };
 }
 
@@ -405,6 +411,8 @@ async function doAction(a) {
       return castMedia(a);
     case 'castControl':
       return castControl(a);
+    case 'ytAutoOkCancel':
+      return ytOk.cancel('user');
     default:
       throw new Error('acción desconocida: ' + a.type);
   }
@@ -447,11 +455,35 @@ const caster = createCaster({
   log,
 });
 
+let ytOk = null;
+ytOk = createYtAutoOk({
+  getForeground: () => foregroundApp(),
+  pressEnter: () => tv.button('ENTER'),
+  isYouTube,
+  delayMs: cfg.ytAutoOkMs,
+  log,
+  onChange: () => broadcast({ event: 'status', ...publicStatus() }),
+});
+
+function scheduleYtAutoOk(wasForeground, method) {
+  if (!(cfg.ytAutoOkMs > 0)) return { skipped: true, reason: 'disabled' };
+  if (method === 'browser') return { skipped: true, reason: 'browser' };
+  if (wasForeground) return { skipped: true, reason: 'already-foreground' };
+  const armed = ytOk.arm();
+  log('YouTube no estaba delante: un OK dentro de', cfg.ytAutoOkMs, 'ms');
+  return armed;
+}
+
 async function castMedia(a) {
   const dry = !!(a.dryRun || cfg.castDryRun);
+  const url = String(a.url || '');
+  const method = a.method || 'auto';
   let youtubeTemplate = null;
   let youtubeAppId = null;
-  if (!dry && parseYouTube(String(a.url || ''))) {
+  let ytWasForeground = false;
+  const mayAutoOk = !dry && cfg.ytAutoOkMs > 0 && method !== 'browser' && parseYouTube(url);
+  if (mayAutoOk) ytWasForeground = isYouTube(await foregroundApp());
+  if (!dry && parseYouTube(url)) {
     try {
       const info = await youtubeAppInfo();
       const dl = info.deeplinkingParams && info.deeplinkingParams.contentTarget;
@@ -460,12 +492,13 @@ async function castMedia(a) {
     } catch (_) { /* se usa la plantilla de la app web antigua */ }
   }
   const out = await caster.cast({
-    url: a.url, title: a.title, mime: a.mime, bytes: a.bytes,
-    method: a.method || 'auto', variant: a.variant || 'auto',
+    url, title: a.title, mime: a.mime, bytes: a.bytes,
+    method, variant: a.variant || 'auto',
     dryRun: dry, advertiseHost: advertiseHost(), youtubeTemplate, youtubeAppId,
   });
   if (!dry) {
     castState.current = Object.assign({ at: Date.now(), stopped: false }, out);
+    if (out.via === 'youtube') out.autoOk = scheduleYtAutoOk(ytWasForeground, method);
     broadcast({ event: 'status', ...publicStatus() });
   }
   return out;
@@ -580,11 +613,18 @@ server.listen(cfg.port, cfg.host, () => {
   if (cfg.host === '0.0.0.0' && ips.length) log('Desde otro dispositivo de la red:', ips.map((ip) => `http://${ip}:${cfg.port}`).join('  '));
   log('Archivos para la tele (IPv4): http://' + advertiseHost() + ':' + cfg.port + '/cast/');
   if (cfg.castDryRun) log('CAST_DRY_RUN: los envíos no se mandan a la tele');
+  log(cfg.ytAutoOkMs > 0 ? 'OK automático de YouTube: ' + cfg.ytAutoOkMs + ' ms' : 'OK automático de YouTube desactivado');
   if (!tvState.clientKey) log('Primera vez: acepta el aviso que aparecerá en la TV.');
   tv.start();
 });
 
-function shutdown() { clearInterval(castSweep); tv.stop(); server.close(); process.exit(0); }
+function shutdown() {
+  clearInterval(castSweep);
+  if (ytOk) ytOk.cancel('shutdown');
+  tv.stop();
+  server.close();
+  process.exit(0);
+}
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 

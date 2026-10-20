@@ -74,6 +74,7 @@ nano config.json
 | `castDir` | `CAST_DIR` | temporal del sistema | Carpeta de esos archivos (uno cada vez; se borran a las `castTtlHours`) |
 | `castTtlHours` | `CAST_TTL_HOURS` | `12` | Horas que se conserva el archivo servido |
 | `castDryRun` | `CAST_DRY_RUN` | `false` | `true` = la pestaña Enviar calcula los mensajes SSAP pero no los manda |
+| `ytAutoOkMs` | `YT_AUTO_OK_MS` | `18000` | Tras abrir YouTube en frío, espera estos milisegundos (cuando la app ya está delante) y pulsa OK una vez. `0` lo desactiva |
 
 Ejemplo sin fichero: `TV_IP=192.168.1.50 node server.js`.
 
@@ -217,7 +218,9 @@ Arriba de la pestaña se muestra la IPv4 que verá la tele, por ejemplo `http://
 | 3 | El mismo payload con `com.webos.app.photovideo` | Nombre del reproductor en webOS 3–5, por si este firmware lo usa |
 | 4 | `ssap://system.launcher/open` `{target}` y, si falla, `com.webos.app.browser` | Navegador. Último recurso |
 
-YouTube, en automático, lanza `youtube.leanback.v4` con `params.contentTarget`. En esta tele la app vieja declara `https://www.youtube.com/tv?v=$CONTENTID` (se lee de `listApps` → `deeplinkingParams`). Si ese lanzamiento falla se prueban `v=ID` y `https://www.youtube.com/watch?v=ID`. El desplegable de la pestaña fuerza uno de los tres. Una búsqueda (`/results?search_query=`) usa el mismo deep link de búsqueda que la pestaña Texto.
+YouTube, en automático, lanza `youtube.leanback.v4` con `params.contentTarget`. En esta tele la app vieja (v1.0.35) acepta `https://www.youtube.com/tv?v=$CONTENTID` (se lee de `listApps` → `deeplinkingParams`). Si ese lanzamiento falla se prueban `v=ID` y `https://www.youtube.com/watch?v=ID`. El desplegable de la pestaña fuerza uno de los tres. Una búsqueda (`/results?search_query=`) usa el mismo deep link de búsqueda que la pestaña Texto.
+
+En un arranque en frío, YouTube se queda en «¿Quién está viendo?» hasta que se pulsa OK. Antes de lanzar se mira `ssap://com.webos.applicationManager/getForegroundAppInfo`. Si YouTube no está ya delante, al terminar el lanzamiento se vuelve a mirar hasta que pase a primer plano y, entonces, se espera `YT_AUTO_OK_MS` (18 s; `0` no pulsa nada) y se manda **un** `ENTER` por el pointer socket (`type:button` / `name:ENTER`). Mientras tanto la página muestra «saltando selección de usuario…» con Cancelar: si se pulsa antes del ENTER, no se envía. Si YouTube ya estaba delante, no se pulsa OK (ahí el mismo enlace reproduce sin el selector). Si la app no llega a primer plano, tampoco se pulsa, para no darle al OK a lo que haya en pantalla.
 
 `media.controls` documentado en el SSAP público: play, pause, stop, rewind, fastForward. **No incluye seek.** Aun así «Ir» prueba `ssap://media.controls/seek` `{position}` en milisegundos y, si la tele lo rechaza, `ssap://com.webos.media/getForegroundAppInfo` + `ssap://com.webos.media/seek` `{position, mediaId}`. Esa segunda llamada es un servicio interno y en webOS 2 puede no estar expuesto. Si las dos fallan, el mensaje lo dice: usa ⏪ y ⏩ del mando.
 
@@ -253,7 +256,7 @@ Desde aquí no se llega a `192.168.1.39`. `npm test` cubre el servidor de rangos
 3. Arrastrar la barra de tiempo del reproductor de la tele contra un archivo local: tiene que pedir `Range` (en el log de Termux no se ve cada petición; desde otro móvil, `curl -D- -H 'Range: bytes=0-100' URL`).
 4. Play / pausa / stop mientras ese medio está abierto.
 5. «Ir» al segundo 30. Si `/api/log` muestra `404` o `500` en `media.controls/seek` y en `com.webos.media/seek`, este firmware no deja saltar por SSAP.
-6. Un enlace `https://www.youtube.com/watch?v=…` abre el vídeo y no solo el inicio de la app. Si no, cambia el desplegable a `v=` o a `watch?v=`.
+6. Un enlace `https://www.youtube.com/watch?v=…` abre el vídeo. En frío, el OK automático debe caer en el selector de perfil (unos 18 s después de que YouTube esté delante) y una sola vez; Cancelar no debe pulsarlo. Si YouTube ya estaba abierto, no debe aparecer el selector ni enviarse ese OK. Si el vídeo no sale, cambia el desplegable a `v=` o a `watch?v=`.
 7. Un `m3u8` de prueba, sabiendo que puede no funcionar.
 8. Un archivo grande (cientos de MB) no lo mata Android a medias: `start.sh` ya toma el wake-lock; la tele tiene que poder hablar con el móvil (sin aislamiento de clientes).
 
@@ -265,6 +268,7 @@ lg-remote/
 ├── start.sh             arranque para Termux (wake-lock)
 ├── lib/lgtv.js          cliente SSAP: registro, client-key, reconexión, keepalive, pointer socket
 ├── lib/cast.js          mensajes SSAP para enviar un medio o un enlace de YouTube, y el orden de reserva
+├── lib/yt-auto-ok.js    un ENTER tras el selector de perfil de YouTube en frío
 ├── lib/cast-http.js     subida del archivo y HTTP con Range, solo IPv4
 ├── lib/wol.js           Wake-on-LAN sin dependencias
 ├── lib/pairing.json     manifest de emparejamiento estándar (firmado) de lgtv2
@@ -279,7 +283,7 @@ lg-remote/
 API para scripts: `curl -X POST http://127.0.0.1:8765/api/action -d '{"type":"button","name":"HOME"}'`
 (tipos: `button`, `ssap` {cmd: volumeUp|volumeDown|channelUp|channelDown|powerOff|toast}, `media`, `mute`, `inputs`, `input`,
 `liveTv`, `apps`, `launch`, `text`, `enter`, `delete`, `move`, `click`, `scroll`, `screenOff`, `screenOn`, `powerOn`, `reconnect`, `status`,
-`cast` {url, method?, variant?, dryRun?, mime?, bytes?, title?}, `castControl` {cmd: play|pause|stop|seek, seconds?}).
+`cast` {url, method?, variant?, dryRun?, mime?, bytes?, title?}, `castControl` {cmd: play|pause|stop|seek, seconds?}, `ytAutoOkCancel`).
 
 ## 9. Pruebas sin tele
 
@@ -302,4 +306,5 @@ TV_IP=127.0.0.1 node server.js   # y abre http://127.0.0.1:8765
 - **La tele no abre el archivo**: la URL tiene que ser la IPv4 de la Wi-Fi (la pestaña Enviar la muestra), no `127.0.0.1`. Misma red, sin aislamiento de clientes. `GET /api/cast` enseña la IP que se está anunciando; cámbiala con `CAST_HOST` si hace falta.
 - **Se abre la app pero no hay imagen**: prueba otro método en el desplegable (SmartShare o navegador) y mira `/api/log`. Un MP4 H.264 cabe; HEVC o WebM en esta tele de 2015 es muy posible que no.
 - **YouTube solo abre la portada**: cambia el formato del enlace (`tv?v=`, `v=`, `watch?v=`) y vuelve a enviar.
+- **YouTube se queda en «¿Quién está viendo?»**: el OK automático espera 18 s desde que la app está delante. Si el selector sale antes o después, cambia `YT_AUTO_OK_MS`. `0` lo deja en manual. Cancelar en el aviso de la página evita esa pulsación.
 - **El salto no hace nada**: en webOS 2 seek no está en la lista pública de SSAP. El error queda en `/api/log`; mientras tanto, ⏪ y ⏩.

@@ -6,5 +6,6 @@
   "host": "0.0.0.0",
   "port": 8765,
   "castHost": "",
-  "castMaxMb": 2048
+  "castMaxMb": 2048,
+  "ytAutoOkMs": 18000
 }

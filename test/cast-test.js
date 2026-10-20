@@ -14,6 +14,7 @@ const {
   listenHost, pickLanIPv4, sanitizeName, parseByteRange, createCastStore, serveCast, isIPv4,
 } = require('../lib/cast-http');
 const { createMockTv } = require('./mock-tv');
+const { createYtAutoOk, parseYtAutoOkMs } = require('../lib/yt-auto-ok');
 
 const ROOT = path.join(__dirname, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -297,6 +298,7 @@ function viewer(url, title, mime, withLoop) {
       STATE_FILE: path.join(work, 'tv-state.json'),
       CAST_DIR: path.join(work, 'files'),
       CAST_MAX_MB: '1',
+      YT_AUTO_OK_MS: '0',
       WOL_ADDRESSES: '127.0.0.1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -349,6 +351,8 @@ function viewer(url, title, mime, withLoop) {
     assert.equal(tube.data.contentTarget, 'https://www.youtube.com/tv?v=dQw4w9WgXcQ');
     assert.ok(!mock.log.requests.slice(nReq).some((r) => r.uri === 'ssap://media.viewer/open'));
     assert.equal(mock.state.launched.at(-1).params.contentTarget, 'https://www.youtube.com/tv?v=dQw4w9WgXcQ');
+    assert.equal(tube.data.autoOk.reason, 'disabled');
+    assert.equal(mock.log.pointer.filter((p) => p.includes('name:ENTER')).length, 0);
     ok('el enlace de YouTube sale por la app, con la plantilla que declara la tele');
 
     mock.state.fail['media.viewer/open'] = Infinity;
@@ -379,8 +383,8 @@ function viewer(url, title, mime, withLoop) {
     assert.equal((await api({ type: 'cast', url: 'http://[2001:db8::1]/a.mp4' })).ok, false);
     const html = await fetch('http://127.0.0.1:' + port + '/').then((r) => r.text());
     assert.ok(html.includes('id="page-enviar"') && html.includes('Elegir archivo del móvil'));
+    assert.ok(html.includes('id="ytOkBanner"') && html.includes('saltando selección de usuario'));
     ok('stop, el mando de siempre y la pestaña Enviar siguen en su sitio');
-    console.log('\nOK: ' + passed + ' comprobaciones de cast');
   } catch (e) {
     console.error('\nFALLO:', e.stack || e);
     console.error('--- log servidor ---\n' + log);
@@ -390,5 +394,141 @@ function viewer(url, title, mime, withLoop) {
     await mock.close();
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log('F) Un solo OK tras el arranque en frío de YouTube');
+  assert.equal(parseYtAutoOkMs(undefined), 18000);
+  assert.equal(parseYtAutoOkMs(''), 18000);
+  assert.equal(parseYtAutoOkMs('no'), 18000);
+  assert.equal(parseYtAutoOkMs(0), 0);
+  assert.equal(parseYtAutoOkMs('0'), 0);
+  assert.equal(parseYtAutoOkMs(-5), 0);
+  assert.equal(parseYtAutoOkMs(400), 400);
+  assert.equal(parseYtAutoOkMs(999999), 120000);
+  ok('YT_AUTO_OK_MS: 18 s por defecto, 0 lo apaga y no pasa de 120 s');
+
+  const isYt = (id) => /^youtube\./i.test(id || '');
+  async function scripted(foreground, delayMs) {
+    let enters = 0;
+    let n = 0;
+    const ctl = createYtAutoOk({
+      getForeground: async () => (typeof foreground === 'function' ? foreground(++n) : foreground),
+      pressEnter: async () => { enters++; },
+      isYouTube: isYt,
+      delayMs,
+      pollEvery: 15,
+      pollFor: 70,
+    });
+    return { ctl, count: () => enters };
+  }
+  const never = await scripted('com.webos.app.livetv', 30);
+  never.ctl.arm();
+  await sleep(180);
+  assert.equal(never.count(), 0);
+  assert.equal(never.ctl.snapshot().phase, 'skipped');
+  ok('si YouTube no pasa a primer plano no se pulsa ENTER');
+
+  const later = await scripted((n) => (n >= 3 ? 'youtube.leanback.v4' : 'com.webos.app.livetv'), 50);
+  const tLater = Date.now();
+  later.ctl.arm();
+  await sleep(250);
+  assert.equal(later.count(), 1);
+  assert.ok(Date.now() - tLater >= 50);
+  assert.equal(later.ctl.snapshot().phase, 'done');
+  later.ctl.arm();
+  later.ctl.cancel('user');
+  await sleep(120);
+  assert.equal(later.count(), 1);
+  assert.equal(later.ctl.snapshot().phase, 'cancelled');
+  ok('tras ver YouTube delante se espera el retardo y se pulsa una sola vez');
+
+  const twice = await scripted('youtube.leanback.v4', 80);
+  twice.ctl.arm();
+  twice.ctl.arm();
+  await sleep(200);
+  assert.equal(twice.count(), 1);
+  assert.equal(twice.ctl.snapshot().phase, 'done');
+  ok('un segundo envío cancela el OK anterior si todavía no se ha pulsado');
+
+  const mockF = await createMockTv({ promptDelay: 80 });
+  const workF = fs.mkdtempSync(path.join(os.tmpdir(), 'lgcast-yt-'));
+  const portF = 18769;
+  const childF = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
+    env: {
+      ...process.env,
+      CONFIG: path.join(workF, 'none.json'),
+      TV_IP: '127.0.0.1',
+      TV_PORT: String(mockF.port),
+      PORT: String(portF),
+      HOST: '127.0.0.1',
+      STATE_FILE: path.join(workF, 'tv-state.json'),
+      CAST_DIR: path.join(workF, 'files'),
+      YT_AUTO_OK_MS: '350',
+      WOL_ADDRESSES: '127.0.0.1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let logF = '';
+  childF.stdout.on('data', (d) => { logF += d; });
+  childF.stderr.on('data', (d) => { logF += d; });
+  const apiF = (a) => fetch('http://127.0.0.1:' + portF + '/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then((r) => r.json());
+  const statusF = () => fetch('http://127.0.0.1:' + portF + '/api/status').then((r) => r.json());
+  const ENTER = 'type:button\nname:ENTER\n\n';
+  const entersF = () => mockF.log.pointer.filter((p) => p === ENTER).length;
+  try {
+    const t0 = Date.now();
+    let st = null;
+    while (Date.now() - t0 < 8000) {
+      st = await statusF().catch(() => null);
+      if (st && st.state === 'connected') break;
+      await sleep(40);
+    }
+    assert.equal(st && st.state, 'connected');
+    mockF.state.foreground = 'com.webos.app.livetv';
+    const cold = await apiF({ type: 'cast', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
+    assert.equal(cold.ok, true, cold.error);
+    assert.equal(cold.data.contentTarget, 'https://www.youtube.com/tv?v=dQw4w9WgXcQ');
+    assert.equal(cold.data.autoOk.pending, true);
+    assert.equal(cold.data.autoOk.delayMs, 350);
+    assert.equal((await statusF()).ytAutoOk.phase, 'waiting');
+    const until = Date.now() + 3000;
+    while (Date.now() < until && entersF() < 1) await sleep(20);
+    assert.equal(entersF(), 1);
+    assert.equal(mockF.log.pointer.filter((p) => p === ENTER)[0], ENTER);
+    await sleep(400);
+    assert.equal(entersF(), 1);
+    assert.equal((await statusF()).ytAutoOk.phase, 'done');
+    ok('arranque en frío: un ENTER por el pointer socket, con la URL tv?v=');
+
+    const beforeWarm = entersF();
+    mockF.state.foreground = 'youtube.leanback.v4';
+    const warm = await apiF({ type: 'cast', url: 'https://youtu.be/dQw4w9WgXcQ', variant: 'watch' });
+    assert.equal(warm.ok, true, warm.error);
+    assert.equal(warm.data.contentTarget, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    assert.equal(warm.data.autoOk.reason, 'already-foreground');
+    await sleep(700);
+    assert.equal(entersF(), beforeWarm);
+    ok('si YouTube ya está delante no se pulsa OK, y watch?v= sigue disponible');
+
+    mockF.state.foreground = 'com.webos.app.livetv';
+    const beforeCancel = entersF();
+    const again = await apiF({ type: 'cast', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', variant: 'v' });
+    assert.equal(again.data.contentTarget, 'v=dQw4w9WgXcQ');
+    assert.equal(again.data.autoOk.pending, true);
+    const stopped = await apiF({ type: 'ytAutoOkCancel' });
+    assert.equal(stopped.ok && stopped.data.phase, 'cancelled', JSON.stringify(stopped));
+    await sleep(800);
+    assert.equal(entersF(), beforeCancel);
+    assert.equal((await statusF()).ytAutoOk.phase, 'cancelled');
+    ok('cancelar durante la espera no envía el ENTER');
+    console.log('\nOK: ' + passed + ' comprobaciones de cast');
+  } catch (e) {
+    console.error('\nFALLO:', e.stack || e);
+    console.error('--- log servidor ---\n' + logF);
+    process.exitCode = 1;
+  } finally {
+    childF.kill();
+    await mockF.close();
+    fs.rmSync(workF, { recursive: true, force: true });
   }
 })();

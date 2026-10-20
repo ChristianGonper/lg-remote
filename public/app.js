@@ -52,6 +52,16 @@
     if (st === 'disconnected' && status.detail) txt += ' · ' + status.detail;
     $('#statusText').textContent = txt;
     $('#promptBanner').classList.toggle('hidden', st !== 'prompt');
+    const ytPhase = status.ytAutoOk && status.ytAutoOk.phase;
+    const ytBanner = $('#ytOkBanner');
+    if (ytBanner) ytBanner.classList.toggle('hidden', ytPhase !== 'waiting');
+    if (ytPhase && ytPhase !== renderStatus.ytPhase && ytPhase !== 'waiting' && ytPhase !== 'idle') {
+      const reason = status.ytAutoOk.reason;
+      if (ytPhase === 'done') toast('OK enviado a la selección de usuario');
+      else if (ytPhase === 'cancelled' && reason !== 'replaced' && reason !== 'shutdown') toast('Cancelado: no se pulsa OK');
+      else if (ytPhase === 'skipped' && reason === 'not-foreground') toast('YouTube no llegó a primer plano; no se ha pulsado OK');
+    }
+    renderStatus.ytPhase = ytPhase || null;
     const v = status.volume;
     $('#volText').textContent = v && v.volume !== undefined ? (v.muted ? '🔇 ' : '🔊 ') + v.volume : '';
     const lan = $('#castLan');
@@ -285,6 +295,10 @@
       return;
     }
     box.textContent = (d.title || 'Medio') + '\n' + (d.viaLabel || d.via || '') + (d.contentTarget ? '\n' + d.contentTarget : '') + '\n' + (d.url || '');
+    if (d.autoOk && d.autoOk.pending) {
+      status.ytAutoOk = { phase: 'waiting', id: d.autoOk.id, delayMs: d.autoOk.delayMs, sent: false };
+      renderStatus();
+    }
     toast('Enviado por ' + (d.viaLabel || d.via) + (d.warning ? '. ' + d.warning : ''), d.warning ? 5000 : 2500);
   }
 
@@ -351,6 +365,12 @@
     if (r.ok && cmd === 'seek') toast('Salto a ' + Math.round(r.data.position / 1000) + ' s (' + r.data.via + ')');
     if (r.ok && cmd === 'stop') { toast('Parado'); $('#castState').textContent = 'Parado'; }
   }
+  const ytOkCancel = $('#ytOkCancel');
+  if (ytOkCancel) ytOkCancel.addEventListener('click', async () => {
+    const r = await send({ type: 'ytAutoOkCancel' });
+    if (r.ok && r.data) { status.ytAutoOk = r.data; renderStatus(); }
+  });
+
   $('#castPlay').addEventListener('click', () => castCmd('play'));
   $('#castPause').addEventListener('click', () => castCmd('pause'));
   $('#castStop').addEventListener('click', () => castCmd('stop'));
