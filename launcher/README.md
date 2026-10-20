@@ -14,7 +14,7 @@ El WebKit de webOS 2 es de la generación de Safari 7/8 (sobre la revisión ~538
 
 ## Vista previa en el ordenador
 
-Sin tele y sin PalmServiceBridge, la página usa datos de mentira (YouTube, Netflix, LG Store, Ajustes, Homebrew, HDMI, AV, componentes y euroconector).
+Sin tele y sin PalmServiceBridge, la página usa la lista de esta tele (YouTube, Live TV, LG Store, Ajustes, Homebrew, Yomvi, MiTele; Netflix no está) y las entradas HDMI, AV1 (SCART), AV2 y componentes.
 
 ```sh
 cd launcher
@@ -57,28 +57,37 @@ Eso hay que confirmarlo en esta tele con el mando físico y con el del móvil: e
 
 ## Cómo habla con la tele
 
-Desde una app web el bus es `PalmServiceBridge` (lo mismo que envuelve `webOSTV.js` 1.x). Si el sistema ya inyectó `webOS.service.request`, se usa ese. Cada llamada guarda el puente hasta la respuesta, con un tope de 2,5 s, porque si se pierde la referencia el callback no llega.
+Desde una app web el bus es `PalmServiceBridge` (lo mismo que envuelve `webOSTV.js` 1.x). Si el sistema ya inyectó `webOS.service.request`, se usa ese. Cada llamada guarda el puente hasta la respuesta. En el firmware 03.21.40 una app sin privilegios no puede leer la lista: `com.webos.applicationManager/listLaunchPoints` y `/listApps` responden «Unknown method», y `com.webos.service.applicationmanager` no existe. `launch` sí funciona.
 
-No es la API SSAP del mando (`ssap://tv/...`). Esas URI públicas no son servicios `luna://`.
+La lista se pide así, y el JSON llega en `stdoutString`:
 
-| Acción | Primera URI | Si falla |
-|---|---|---|
-| Lista de apps | `luna://com.webos.applicationManager/listLaunchPoints` | `.../listApps`, y luego el alias nuevo `com.webos.service.applicationmanager` (en webOS 2 normalmente no está) |
-| Abrir app | `luna://com.webos.applicationManager/launch` `{"id":"..."}` | el alias `com.webos.service.applicationmanager/launch` |
-| Entradas | `luna://com.webos.service.tv.externaldevice/getExternalInputList` | `listDevices`, luego `com.webos.service.eim/getAllInputStatus`, y al final las apps `com.webos.app.hdmiN` / `externalinput.*` de la lista |
-| Cambiar entrada | `luna://com.webos.service.tv.externaldevice/switchInput` `{"inputId":"HDMI_1"}` | abrir la app de esa entrada (`com.webos.app.hdmi1`, etc.), que es el camino que ya usa el mando en esta tele |
+```sh
+luna://org.webosbrew.hbchannel.service/exec
+{"command":"luna-send -n 1 luna://com.webos.applicationManager/listLaunchPoints '{}'"}
+```
 
-Ids fijos de esta generación, en este orden en la fila:
+Si Homebrew Channel no está, se prueban las dos llamadas directas y, si fallan, se quedan los mosaicos fijos (sin el aviso de lista vacía como único estado útil: el aviso sale, y YouTube, Live TV, LG Store, Ajustes y Homebrew siguen pudiéndose abrir).
 
-| Mosaico | Id que se prueba |
+| Acción | URI que responde en esta tele |
+|---|---|
+| Lista de apps | `org.webosbrew.hbchannel.service/exec` → `listLaunchPoints` |
+| Abrir app o entrada | `luna://com.webos.applicationManager/launch` `{"id":"..."}` |
+| Entradas | `luna://com.webos.service.eim/getAllInputStatus` |
+
+`com.webos.service.tv.externaldevice` no tiene `getExternalInputList`, `listDevices` ni `switchInput` en este firmware. Cambiar de entrada es abrir la app: `com.webos.app.hdmi1` … `hdmi4`, `com.webos.app.externalinput.av1`, `.av2`, `.component`, `.scart`. AV1 y AV2 no se etiquetan las dos como «AV»: AV1 es «AV1 (SCART)» y AV2 es «AV2».
+
+Ids de esta tele, en este orden en la fila:
+
+| Mosaico | Id |
 |---|---|
 | YouTube | `youtube.leanback.v4` |
-| Netflix | `netflix` (solo si `listApps` lo confirma; si la lista falla, no se inventa) |
-| LG Store | `com.webos.app.discovery`, luego `com.webos.app.store` |
-| Ajustes | `com.webos.app.settings`, luego `com.palm.app.settings` |
+| Live TV | `com.webos.app.livetv` |
+| Netflix | `netflix` (solo si la lista lo trae; en esta tele no está instalada) |
+| LG Store | `com.webos.app.discovery` |
+| Ajustes | `com.palm.app.settings` (no `com.webos.app.settings`) |
 | Homebrew Channel | `org.webosbrew.hbchannel` |
-| TV | `com.webos.app.livetv` |
-| HDMI | `com.webos.app.hdmi1`, `com.webos.app.hdmi2`, … |
+
+También están en la tele, y salen en «Todas»: `com.webos.app.browser`, `com.webos.app.smartshare`, `canal.yomvi`, `com.mitele.app`.
 
 El hueco «Ahora / Cast» no puede leer una sesión de cast: webOS 2 no se la da a una app web. Muestra la entrada con señal (o «Sin reproducción») y deja el cast marcado como no disponible.
 
@@ -93,7 +102,7 @@ node launcher/scripts/make-icons.js   # ya deja icon.png, largeIcon.png y splash
 node launcher/scripts/pack-ipk.js
 ```
 
-Sale `launcher/dist/com.christiangonper.launcher_0.1.0_all.ipk` y su sha256.
+Sale `launcher/dist/com.christiangonper.launcher_0.1.1_all.ipk` y su sha256.
 
 Si tienes `ares-package` del SDK, también vale (el resultado debe ser el mismo tipo de ipk):
 
@@ -108,20 +117,20 @@ La tele está rooteada, con Homebrew Channel 0.7.3 y SSH de root por clave. IP d
 Desde el ordenador:
 
 ```sh
-scp launcher/dist/com.christiangonper.launcher_0.1.0_all.ipk root@192.168.1.39:/tmp/
+scp launcher/dist/com.christiangonper.launcher_0.1.1_all.ipk root@192.168.1.39:/tmp/
 ssh root@192.168.1.39
 ```
 
 En la tele, y dejando el comando abierto hasta que el JSON diga `installed` (Ctrl+C después):
 
 ```sh
-luna-send -i luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.0_all.ipk","subscribe":true}'
+luna-send -i luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.1_all.ipk","subscribe":true}'
 ```
 
 Si este `luna-send` de webOS 2 no admite `-i`, la variante de una respuesta es:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.0_all.ipk","subscribe":true}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"com.christiangonper.launcher","ipkUrl":"/tmp/com.christiangonper.launcher_0.1.1_all.ipk","subscribe":true}'
 ```
 
 Para abrirla sin buscar el icono:
@@ -135,7 +144,7 @@ Si `dev/install` responde que el id no coincide con el del paquete, reintenta co
 Homebrew Channel también instala por su servicio, pero ese camino quiere una URL http(s) y el sha256 que imprime `pack-ipk.js`, no un archivo local:
 
 ```sh
-luna-send -n 1 luna://org.webosbrew.hbchannel.service/install '{"ipkUrl":"https://…/com.christiangonper.launcher_0.1.0_all.ipk","ipkHash":"<sha256>"}'
+luna-send -n 1 luna://org.webosbrew.hbchannel.service/install '{"ipkUrl":"https://…/com.christiangonper.launcher_0.1.1_all.ipk","ipkHash":"<sha256>"}'
 ```
 
 ### Si dev/install dice que hace falta el modo desarrollador
@@ -145,7 +154,7 @@ El root con Homebrew Channel 0.7.3 suele dejarlo activo. Si no, actívalo desde 
 ```sh
 cd /tmp
 rm -rf /tmp/launcher-unpack && mkdir /tmp/launcher-unpack && cd /tmp/launcher-unpack
-ar x /tmp/com.christiangonper.launcher_0.1.0_all.ipk
+ar x /tmp/com.christiangonper.launcher_0.1.1_all.ipk
 tar -xzf data.tar.gz
 mkdir -p /media/developer/apps/usr/palm/applications/com.christiangonper.launcher
 cp -a usr/palm/applications/com.christiangonper.launcher/. /media/developer/apps/usr/palm/applications/com.christiangonper.launcher/
@@ -167,10 +176,10 @@ La vista previa no puede verificar el bus luna ni el mando de verdad. En la 32LF
 1. `dev/install` termina en `installed` y aparece **Inicio** en Homebrew Channel y en la lista de apps. El home del sistema sigue siendo el de LG.
 2. La app sale del splash (`stageReady`) y se ve entera a 1280×720, sin recortes.
 3. Las flechas mueven el foco, OK abre y Atrás cierra la lista o sale de la app. Repetir con el mando de la tele y con los botones del mando SSAP del móvil.
-4. El botón azul muestra qué URI respondió (`listLaunchPoints` o `listApps`, y cuál de las de entradas).
-5. Netflix sale solo si está instalada. YouTube abre `youtube.leanback.v4`.
-6. LG Store abre `com.webos.app.discovery` (si en este firmware el id es otro, el diagnóstico y el fallo de apertura lo dirán).
-7. Ajustes abre. Homebrew Channel abre `org.webosbrew.hbchannel`.
-8. HDMI 1 y HDMI 2 cambian de entrada. Anotar si fue `switchInput` o si hizo falta abrir `com.webos.app.hdmiN` (el aviso y el diagnóstico lo distinguen: si `switchInput` falla, el segundo paso es abrir la app).
+4. El botón azul muestra `hbchannel.service/exec` en la lista y `eim/getAllInputStatus` en las entradas. No debe salir «Sin lista de la tele».
+5. Netflix no sale (no está instalada). YouTube abre `youtube.leanback.v4`. Live TV abre `com.webos.app.livetv`.
+6. LG Store abre `com.webos.app.discovery`.
+7. Ajustes abre `com.palm.app.settings`. Homebrew Channel abre `org.webosbrew.hbchannel`.
+8. HDMI abre `com.webos.app.hdmiN`. AV1 (SCART) abre `externalinput.av1` y AV2 abre `externalinput.av2` (no las dos como «AV»). Componentes abre `externalinput.component`.
 9. El reloj es la hora local. «Cast» sigue en «no disponible»; como mucho se marca la entrada que tiene señal.
 10. Nada de esto modifica el arranque ni el firmware.

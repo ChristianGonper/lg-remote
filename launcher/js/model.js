@@ -14,6 +14,13 @@
       color: '#c4302b'
     },
     {
+      key: 'livetv',
+      title: 'Live TV',
+      subtitle: 'Antena',
+      ids: ['com.webos.app.livetv'],
+      color: '#c6a15a'
+    },
+    {
       key: 'netflix',
       title: 'Netflix',
       subtitle: 'Vídeo',
@@ -32,7 +39,7 @@
       key: 'settings',
       title: 'Ajustes',
       subtitle: 'Sistema',
-      ids: ['com.webos.app.settings', 'com.palm.app.settings'],
+      ids: ['com.palm.app.settings', 'com.webos.app.settings'],
       color: '#8d8a84'
     },
     {
@@ -162,43 +169,44 @@
     return { id: 'TV', label: 'TV', appId: 'com.webos.app.livetv', subtitle: 'Antena' };
   }
 
-  function prettyLabel(id, label) {
-    var src = String(label || id || '');
-    var m = /hdmi[\s_-]*(\d+)/i.exec(src) || /hdmi[\s_-]*(\d+)/i.exec(String(id || ''));
-    if (m) return 'HDMI ' + m[1];
-    if (/^av[\s_-]*\d*$/i.test(src) || /^AV_\d+$/i.test(String(id || ''))) return 'AV';
-    if (/scart/i.test(src) || /scart/i.test(String(id || ''))) return 'Euroconector';
-    if (/component|comp/i.test(src) || /^COMP_/i.test(String(id || ''))) return 'Componentes';
-    if (id === 'TV' || /livetv/i.test(String(id || '')) || /livetv/i.test(src)) return 'TV';
-    return src;
+  function avLabel(n) {
+    if (String(n || '1') === '1') return 'AV1 (SCART)';
+    return 'AV' + n;
+  }
+
+  function analog(kind, n) {
+    if (kind === 'av') {
+      var num = n || '1';
+      return { id: 'AV_' + num, label: avLabel(num), appId: 'com.webos.app.externalinput.av' + num };
+    }
+    if (kind === 'scart') {
+      return { id: 'SCART_1', label: 'Euroconector', appId: 'com.webos.app.externalinput.scart' };
+    }
+    return { id: 'COMP_1', label: 'Componentes', appId: 'com.webos.app.externalinput.component' };
   }
 
   function normalizeInput(rawId, appId, label) {
     var id = String(rawId || '');
     var app = String(appId || '');
+    var src = String(label || '');
     var m;
     if (/livetv/i.test(app) || /livetv/i.test(id) || /^tv$/i.test(id)) {
       return { id: 'TV', label: 'TV', appId: 'com.webos.app.livetv' };
     }
     m = /^HDMI[\s_-]?(\d+)$/i.exec(id) || /^com\.webos\.app\.hdmi(\d+)$/.exec(app) || /^com\.webos\.app\.hdmi(\d+)$/.exec(id);
+    if (!m && src) m = /^HDMI[\s_-]?(\d+)$/i.exec(src);
     if (m) {
       return { id: 'HDMI_' + m[1], label: 'HDMI ' + m[1], appId: 'com.webos.app.hdmi' + m[1] };
     }
-    m = /^com\.webos\.app\.externalinput\.(av|scart|component|comp)(\d*)$/.exec(app || id);
-    if (m) {
-      var kind = m[1];
-      var n = m[2] || '1';
-      var prefix = kind === 'av' ? 'AV' : (kind === 'scart' ? 'SCART' : 'COMP');
-      var canon = prefix + '_' + n;
-      return { id: canon, label: prettyLabel(canon, label), appId: app || id };
-    }
-    if (/^AV[\s_-]?(\d*)$/i.test(id)) {
-      m = /^AV[\s_-]?(\d*)$/i.exec(id);
-      var avn = m[1] || '1';
-      return { id: 'AV_' + avn, label: 'AV', appId: app || ('com.webos.app.externalinput.av' + avn) };
-    }
+    m = /^com\.webos\.app\.externalinput\.(av|scart|component|comp)(\d*)$/.exec(app) ||
+      /^com\.webos\.app\.externalinput\.(av|scart|component|comp)(\d*)$/.exec(id);
+    if (m) return analog(m[1], m[2]);
+    m = /^AV[\s_-]?(\d+)$/i.exec(id);
+    if (m) return analog('av', m[1]);
+    if (/^SCART[\s_-]?\d*$/i.test(id)) return analog('scart', '');
+    if (/^(COMP|COMPONENT)[\s_-]?\d*$/i.test(id)) return analog('component', '');
     if (!id && !app) return null;
-    return { id: id || app, label: prettyLabel(id || app, label), appId: app };
+    return { id: id || app, label: src || id || app, appId: app };
   }
 
   function subtitleFor(item) {
@@ -209,7 +217,7 @@
   }
 
   function inputsFrom(res) {
-    var list = (res && (res.devices || res.inputList || res.externalInputList || res.devicesList)) || [];
+    var list = (res && (res.devices || res.deviceList || res.inputList || res.externalInputList || res.devicesList)) || [];
     var out = [];
     var seen = {};
     var i;
@@ -220,9 +228,10 @@
       if (!norm || seen[norm.id]) continue;
       seen[norm.id] = true;
       var connected = asBool(d.connected);
+      if (connected === undefined) connected = asBool(d.connect);
       if (connected === undefined) connected = asBool(d.connectStatus || d.deviceStatus);
       norm.connected = connected;
-      norm.current = !!(d.current === true || d.activated === true || d.active === true);
+      norm.current = !!(d.current === true || d.activated === true || d.active === true || d.activate === true);
       norm.subtitle = subtitleFor(norm);
       out.push(norm);
     }
@@ -276,7 +285,10 @@
   function defaultInputs() {
     return withTv([
       { id: 'HDMI_1', label: 'HDMI 1', appId: 'com.webos.app.hdmi1', subtitle: 'Entrada' },
-      { id: 'HDMI_2', label: 'HDMI 2', appId: 'com.webos.app.hdmi2', subtitle: 'Entrada' }
+      { id: 'HDMI_2', label: 'HDMI 2', appId: 'com.webos.app.hdmi2', subtitle: 'Entrada' },
+      { id: 'AV_1', label: 'AV1 (SCART)', appId: 'com.webos.app.externalinput.av1', subtitle: 'Entrada' },
+      { id: 'AV_2', label: 'AV2', appId: 'com.webos.app.externalinput.av2', subtitle: 'Entrada' },
+      { id: 'COMP_1', label: 'Componentes', appId: 'com.webos.app.externalinput.component', subtitle: 'Entrada' }
     ]);
   }
 

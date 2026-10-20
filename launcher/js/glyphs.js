@@ -25,6 +25,8 @@
       '<rect x="22" y="22" width="7" height="7" fill="#ffffff"/>',
     tv: '<rect x="10" y="12" width="20" height="13" rx="2" fill="none" stroke="#ffffff" stroke-width="2"/>' +
       '<rect x="18" y="25" width="4" height="3" fill="#ffffff"/>',
+    livetv: '<rect x="10" y="12" width="20" height="13" rx="2" fill="none" stroke="#ffffff" stroke-width="2"/>' +
+      '<rect x="18" y="25" width="4" height="3" fill="#ffffff"/>',
     hdmi: '<rect x="11" y="15" width="18" height="11" rx="2" fill="none" stroke="#ffffff" stroke-width="2"/>' +
       '<rect x="15" y="19" width="3" height="4" fill="#ffffff"/>' +
       '<rect x="21" y="19" width="3" height="4" fill="#ffffff"/>',

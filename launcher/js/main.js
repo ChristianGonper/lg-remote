@@ -94,7 +94,8 @@
   function inputColor(id) {
     if (id === 'TV') return '#c6a15a';
     if (String(id).indexOf('HDMI_') === 0) return '#3d7ea6';
-    if (String(id).indexOf('AV') === 0) return '#8a6a4a';
+    if (id === 'AV_1') return '#8a6a4a';
+    if (String(id).indexOf('AV') === 0) return '#6e5b48';
     if (String(id).indexOf('COMP') === 0) return '#5f7a55';
     if (String(id).indexOf('SCART') === 0) return '#7a6558';
     return '#6a6258';
@@ -136,10 +137,11 @@
     var box = $('apps');
     clear(box);
     var tiles = Model.resolveCurated(state.apps, state.appsKnown);
+    var compact = (tiles.length + 1) > 6;
     var i;
     for (i = 0; i < tiles.length; i++) {
       var spec = tiles[i];
-      box.appendChild(makeTile({
+      var tile = makeTile({
         focusId: 'app:' + spec.key,
         kind: 'app',
         id: spec.id,
@@ -147,16 +149,20 @@
         subtitle: spec.confirmed || !state.appsKnown ? spec.subtitle : 'No está en la lista',
         color: spec.color,
         glyph: Glyphs.forKey(spec.key, spec.color)
-      }));
+      });
+      if (compact) tile.className += ' compact';
+      box.appendChild(tile);
     }
-    box.appendChild(makeTile({
+    var all = makeTile({
       focusId: 'app:all',
       kind: 'all',
       title: 'Todas',
       subtitle: 'Aplicaciones',
       color: '#6a6258',
       glyph: Glyphs.forKey('all', '#6a6258')
-    }));
+    });
+    if (compact) all.className += ' compact';
+    box.appendChild(all);
   }
 
   function renderInputs() {
@@ -427,25 +433,12 @@
   }
 
   function switchTo(inputId, appId, title) {
-    if (inputId === 'TV') {
-      launchApp(appId || 'com.webos.app.livetv', title || 'TV');
+    var id = appId || (inputId === 'TV' ? 'com.webos.app.livetv' : '');
+    if (!id) {
+      toast('No se pudo cambiar a ' + title + '.');
       return;
     }
-    toast('Cambiando a ' + title + '…');
-    client.switchInput(inputId, function (err) {
-      if (!err) {
-        if (state.preview) toast('Vista previa: se pediría la entrada ' + title + '.');
-        return;
-      }
-      if (appId) {
-        client.launch(appId, null, function (err2) {
-          if (err2) toast('No se pudo cambiar a ' + title + '. ' + Model.errText(err2));
-          else if (state.preview) toast('Vista previa: se abriría ' + title + '.');
-        });
-        return;
-      }
-      toast('No se pudo cambiar a ' + title + '. ' + Model.errText(err));
-    });
+    launchApp(id, title);
   }
 
   function activate(el) {

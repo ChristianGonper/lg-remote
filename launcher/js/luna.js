@@ -1,37 +1,34 @@
 /*
- * Llamadas luna:// desde una app web de webOS TV 2.0.
+ * Llamadas luna:// desde una app web de webOS TV 2.0 (fw 03.21.40).
  *
- * En el runtime del televisor el puente es PalmServiceBridge (el mismo que
- * envuelve webOSTV.js). No existe en un navegador de escritorio: ahí se usa
- * un mock para poder desarrollar y hacer capturas.
+ * Una app sin privilegios no puede listar aplicaciones: applicationManager
+ * responde "Unknown method" y com.webos.service.applicationmanager no existe.
+ * En esta tele rooteada la lista sale por Homebrew Channel:
+ *   luna://org.webosbrew.hbchannel.service/exec
+ *   {"command":"luna-send -n 1 luna://com.webos.applicationManager/listLaunchPoints '{}'"}
+ * y el JSON llega en stdoutString. Si ese servicio no está, se prueba la
+ * llamada directa y, si también falla, se quedan los mosaicos fijos.
  *
- * Nombres de servicio en webOS TV 2 (2015), no los de webOS OSE:
- *   - com.webos.applicationManager  (listLaunchPoints, listApps, launch)
- *   - com.webos.service.applicationmanager  es el alias posterior; se prueba
- *     por si el firmware lo tiene, y se abandona si responde error.
- * La API pública SSAP del mando (tv/getExternalInputList, tv/switchInput) no
- * es un servicio luna. En la app se prueban los nombres internos que usa el
- * firmware y, si fallan, se abre la app de la entrada (com.webos.app.hdmiN),
- * que es el recurso que ya funciona en esta tele desde el mando SSAP.
+ * Entradas: com.webos.service.eim/getAllInputStatus. externaldevice no tiene
+ * estos métodos. El cambio de entrada es abrir la app (applicationManager/launch
+ * sí responde): com.webos.app.hdmi1..4, externalinput.av1, .av2, .component, .scart.
  */
 (function (root) {
   var MOCK_APPS = [
     { id: 'youtube.leanback.v4', title: 'YouTube', visible: true },
-    { id: 'netflix', title: 'Netflix', visible: true },
     { id: 'com.webos.app.discovery', title: 'LG Content Store', visible: true },
-    { id: 'com.webos.app.settings', title: 'Ajustes', visible: true },
+    { id: 'com.palm.app.settings', title: 'Ajustes', visible: true },
     { id: 'org.webosbrew.hbchannel', title: 'Homebrew Channel', visible: true },
     { id: 'com.webos.app.browser', title: 'Navegador', visible: true },
     { id: 'com.webos.app.smartshare', title: 'SmartShare', visible: true },
-    { id: 'com.webos.app.music', title: 'Música', visible: true },
-    { id: 'com.webos.app.photovideo', title: 'Fotos y vídeo', visible: true },
-    { id: 'com.webos.app.notificationcenter', title: 'Notificaciones', visible: true },
     { id: 'com.webos.app.livetv', title: 'Live TV', visible: true },
+    { id: 'canal.yomvi', title: 'Yomvi', visible: true },
+    { id: 'com.mitele.app', title: 'MiTele', visible: true },
     { id: 'com.webos.app.hdmi1', title: 'HDMI 1', visible: true },
     { id: 'com.webos.app.hdmi2', title: 'HDMI 2', visible: true },
     { id: 'com.webos.app.externalinput.av1', title: 'AV', visible: true },
-    { id: 'com.webos.app.externalinput.component1', title: 'Component', visible: true },
-    { id: 'com.webos.app.externalinput.scart1', title: 'SCART', visible: true },
+    { id: 'com.webos.app.externalinput.av2', title: 'AV', visible: true },
+    { id: 'com.webos.app.externalinput.component', title: 'Component', visible: true },
     { id: 'com.christiangonper.launcher', title: 'Inicio', visible: true },
     { id: 'com.webos.service.hidden', title: 'Oculta', visible: false }
   ];
@@ -40,30 +37,24 @@
     { id: 'HDMI_1', label: 'HDMI1', connected: true, appId: 'com.webos.app.hdmi1' },
     { id: 'HDMI_2', label: 'HDMI2', connected: false, appId: 'com.webos.app.hdmi2' },
     { id: 'AV_1', label: 'AV', connected: false, appId: 'com.webos.app.externalinput.av1' },
-    { id: 'COMP_1', label: 'Component', connected: false, appId: 'com.webos.app.externalinput.component1' },
-    { id: 'SCART_1', label: 'SCART', connected: false, appId: 'com.webos.app.externalinput.scart1' }
+    { id: 'AV_2', label: 'AV', connected: false, appId: 'com.webos.app.externalinput.av2' },
+    { id: 'COMP_1', label: 'Component', appId: 'com.webos.app.externalinput.component1', connect: false }
   ];
+
+  var HB_EXEC = 'luna://org.webosbrew.hbchannel.service/exec';
+  var LIST_CMD = "luna-send -n 1 luna://com.webos.applicationManager/listLaunchPoints '{}'";
 
   var APP_URIS = [
     'luna://com.webos.applicationManager/listLaunchPoints',
-    'luna://com.webos.applicationManager/listApps',
-    'luna://com.webos.service.applicationmanager/listLaunchPoints',
-    'luna://com.webos.service.applicationmanager/listApps'
+    'luna://com.webos.applicationManager/listApps'
   ];
 
   var INPUT_URIS = [
-    'luna://com.webos.service.tv.externaldevice/getExternalInputList',
-    'luna://com.webos.service.tv.externaldevice/listDevices',
     'luna://com.webos.service.eim/getAllInputStatus'
   ];
 
   var LAUNCH_URIS = [
-    'luna://com.webos.applicationManager/launch',
-    'luna://com.webos.service.applicationmanager/launch'
-  ];
-
-  var SWITCH_URIS = [
-    'luna://com.webos.service.tv.externaldevice/switchInput'
+    'luna://com.webos.applicationManager/launch'
   ];
 
   function detectPreview(search, hasBridge) {
@@ -88,15 +79,45 @@
     return !bridge;
   }
 
+  function tryParseJson(raw) {
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function parseExecStdout(res) {
+    if (!res) return null;
+    var raw = res.stdoutString;
+    if (raw == null || raw === '') raw = res.stdout;
+    if (raw && typeof raw === 'object') {
+      if (raw.returnValue === false) return null;
+      if ((raw.launchPoints && raw.launchPoints.length) || (raw.apps && raw.apps.length)) return raw;
+      return null;
+    }
+    raw = String(raw || '').replace(/^\s+|\s+$/g, '');
+    if (!raw) return null;
+    var parsed = tryParseJson(raw);
+    if (!parsed) {
+      var start = raw.indexOf('{');
+      var end = raw.lastIndexOf('}');
+      if (start >= 0 && end > start) parsed = tryParseJson(raw.slice(start, end + 1));
+    }
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.returnValue === false) return null;
+    var list = parsed.launchPoints || parsed.apps;
+    if (!list || !list.length) return null;
+    return parsed;
+  }
+
   function mockResult(uri, params) {
+    if (uri.indexOf('hbchannel.service/exec') >= 0) {
+      return {
+        returnValue: true,
+        stdoutString: JSON.stringify({ returnValue: true, launchPoints: MOCK_APPS })
+      };
+    }
     if (uri.indexOf('/listLaunchPoints') >= 0) return { returnValue: true, launchPoints: MOCK_APPS };
     if (uri.indexOf('/listApps') >= 0) return { returnValue: true, apps: MOCK_APPS };
-    if (uri.indexOf('getExternalInputList') >= 0 || uri.indexOf('/listDevices') >= 0) {
-      return { returnValue: true, devices: MOCK_INPUTS };
-    }
-    if (uri.indexOf('getAllInputStatus') >= 0) return { returnValue: true, inputList: MOCK_INPUTS };
+    if (uri.indexOf('getAllInputStatus') >= 0) return { returnValue: true, deviceList: MOCK_INPUTS };
     if (uri.indexOf('/launch') >= 0) return { returnValue: true, id: params && params.id };
-    if (uri.indexOf('switchInput') >= 0) return { returnValue: true, inputId: params && params.inputId };
     return { returnValue: false, errorText: 'uri desconocida en la vista previa', uri: uri };
   }
 
@@ -265,15 +286,22 @@
     }
 
     function listApps(cb) {
-      chain(APP_URIS, {}, function (res) {
-        var list = res && (res.launchPoints || res.apps);
-        return !!(list && list.length);
-      }, cb);
+      call(HB_EXEC, { command: LIST_CMD }, function (err, res) {
+        var parsed = (!err && res) ? parseExecStdout(res) : null;
+        if (parsed) {
+          cb(null, parsed, HB_EXEC);
+          return;
+        }
+        chain(APP_URIS, {}, function (body) {
+          var list = body && (body.launchPoints || body.apps);
+          return !!(list && list.length);
+        }, cb);
+      }, 8000);
     }
 
     function listInputs(cb) {
       chain(INPUT_URIS, {}, function (res) {
-        var list = res && (res.devices || res.inputList || res.externalInputList || res.devicesList);
+        var list = res && (res.devices || res.deviceList || res.inputList || res.externalInputList || res.devicesList);
         return !!(list && list.length);
       }, cb);
     }
@@ -284,16 +312,11 @@
       chain(LAUNCH_URIS, body, function () { return true; }, cb);
     }
 
-    function switchInput(inputId, cb) {
-      chain(SWITCH_URIS, { inputId: inputId }, function () { return true; }, cb);
-    }
-
     return {
       call: call,
       listApps: listApps,
       listInputs: listInputs,
-      launch: launch,
-      switchInput: switchInput
+      launch: launch
     };
   }
 
@@ -352,9 +375,12 @@
   var api = {
     MOCK_APPS: MOCK_APPS,
     MOCK_INPUTS: MOCK_INPUTS,
+    HB_EXEC: HB_EXEC,
+    LIST_CMD: LIST_CMD,
     APP_URIS: APP_URIS,
     INPUT_URIS: INPUT_URIS,
     detectPreview: detectPreview,
+    parseExecStdout: parseExecStdout,
     mockResult: mockResult,
     mockTransport: mockTransport,
     createClient: createClient,

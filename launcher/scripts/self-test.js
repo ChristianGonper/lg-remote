@@ -87,20 +87,23 @@ check('saludo y reloj en español, sin Intl', () => {
   assert.strictEqual(clock.dateLine, 'martes, 20 de octubre');
 });
 
-check('Netflix solo si la lista la confirma', () => {
+check('Netflix solo si la lista la confirma, y Ajustes es com.palm.app.settings', () => {
   const apps = [
     { id: 'youtube.leanback.v4', title: 'YouTube' },
     { id: 'com.webos.app.discovery', title: 'LG Content Store' },
-    { id: 'com.webos.app.settings', title: 'Ajustes' },
+    { id: 'com.palm.app.settings', title: 'Ajustes' },
   ];
-  const hidden = model.resolveCurated(apps, true).map((t) => t.key);
-  assert.ok(hidden.indexOf('netflix') < 0);
-  assert.deepStrictEqual(hidden, ['youtube', 'store', 'settings', 'hb']);
+  const hidden = model.resolveCurated(apps, true);
+  assert.ok(hidden.every((t) => t.key !== 'netflix'));
+  assert.deepStrictEqual(hidden.map((t) => t.key), ['youtube', 'livetv', 'store', 'settings', 'hb']);
+  assert.strictEqual(hidden.filter((t) => t.key === 'settings')[0].id, 'com.palm.app.settings');
+  assert.strictEqual(hidden.filter((t) => t.key === 'livetv')[0].id, 'com.webos.app.livetv');
   const withNf = model.resolveCurated(apps.concat([{ id: 'netflix', title: 'Netflix' }]), true);
-  assert.strictEqual(withNf[1].key, 'netflix');
-  assert.strictEqual(withNf[1].id, 'netflix');
+  assert.strictEqual(withNf[2].key, 'netflix');
+  assert.strictEqual(withNf[2].id, 'netflix');
   assert.strictEqual(model.resolveCurated([], false).some((t) => t.key === 'netflix'), false);
-  assert.strictEqual(model.resolveCurated(apps, true)[0].id, 'youtube.leanback.v4');
+  const onlyNew = model.resolveCurated([{ id: 'com.webos.app.settings', title: 'Settings' }], true);
+  assert.strictEqual(onlyNew.filter((t) => t.key === 'settings')[0].id, 'com.webos.app.settings');
 });
 
 check('listApps oculta lo no visible y normaliza entradas', () => {
@@ -112,14 +115,23 @@ check('listApps oculta lo no visible y normaliza entradas', () => {
   assert.ok(gallery.indexOf('com.christiangonper.launcher') < 0);
   assert.ok(gallery.indexOf('com.webos.app.hdmi1') < 0);
   assert.ok(gallery.indexOf('com.webos.app.livetv') < 0);
-  assert.strictEqual(gallery[0], 'com.webos.app.settings');
-  const inputs = model.withTv(model.inputsFrom({ devices: luna.MOCK_INPUTS }));
-  assert.deepStrictEqual(inputs.map((d) => d.label), ['TV', 'HDMI 1', 'HDMI 2', 'AV', 'Componentes', 'Euroconector']);
+  assert.strictEqual(gallery[0], 'com.palm.app.settings');
+  const inputs = model.withTv(model.inputsFrom({ deviceList: luna.MOCK_INPUTS }));
+  assert.deepStrictEqual(inputs.map((d) => d.label), ['TV', 'HDMI 1', 'HDMI 2', 'AV1 (SCART)', 'AV2', 'Componentes']);
+  assert.ok(inputs.every((d) => d.label !== 'AV'));
   assert.strictEqual(inputs[1].connected, true);
   assert.strictEqual(inputs[1].appId, 'com.webos.app.hdmi1');
+  assert.strictEqual(inputs[3].appId, 'com.webos.app.externalinput.av1');
+  assert.strictEqual(inputs[4].appId, 'com.webos.app.externalinput.av2');
+  assert.strictEqual(inputs[5].appId, 'com.webos.app.externalinput.component');
   const fromId = model.normalizeInput('HDMI1', '', '');
   assert.strictEqual(fromId.id, 'HDMI_1');
   assert.strictEqual(fromId.appId, 'com.webos.app.hdmi1');
+  const hdmi4 = model.normalizeInput('HDMI_4', '', '');
+  assert.strictEqual(hdmi4.appId, 'com.webos.app.hdmi4');
+  const scart = model.normalizeInput('SCART_1', 'com.webos.app.externalinput.scart1', 'SCART');
+  assert.strictEqual(scart.label, 'Euroconector');
+  assert.strictEqual(scart.appId, 'com.webos.app.externalinput.scart');
   const fromApps = model.withTv(model.inputsFromApps([
     { id: 'com.webos.app.hdmi2', title: 'HDMI2' },
     { id: 'com.webos.app.livetv', title: 'TV' },
@@ -182,14 +194,32 @@ function runAsync(name, fn) {
     });
 }
 
-runAsync('la cadena luna pasa al siguiente servicio', () => {
+check('stdoutString de hbchannel se parsea aunque venga con ruido', () => {
+  const parsed = luna.parseExecStdout({
+    returnValue: true,
+    stdoutString: 'luna-send\n' + JSON.stringify({
+      returnValue: true,
+      launchPoints: [{ id: 'youtube.leanback.v4', title: 'YouTube', visible: true }],
+    }),
+  });
+  assert.strictEqual(parsed.launchPoints[0].id, 'youtube.leanback.v4');
+  assert.strictEqual(luna.parseExecStdout({ returnValue: true, stdoutString: '' }), null);
+  assert.strictEqual(luna.parseExecStdout({ returnValue: true, stdoutString: '{"returnValue":false}' }), null);
+  assert.strictEqual(luna.LIST_CMD, "luna-send -n 1 luna://com.webos.applicationManager/listLaunchPoints '{}'");
+});
+
+runAsync('sin hbchannel se usa la lista directa y no externaldevice', () => {
   const calls = [];
   const client = luna.createClient({
     timeoutMs: 200,
     transport(uri, params, cb) {
       calls.push(uri);
-      if (uri.indexOf('listLaunchPoints') >= 0 || uri.indexOf('externaldevice') >= 0 || uri.indexOf('/eim/') >= 0) {
-        cb({ returnValue: false, errorText: 'no such service' });
+      if (uri.indexOf('hbchannel.service/exec') >= 0) {
+        cb({ returnValue: false, errorText: 'Service does not exist' });
+        return function () {};
+      }
+      if (uri.indexOf('listLaunchPoints') >= 0 || uri.indexOf('/eim/') >= 0) {
+        cb({ returnValue: false, errorText: 'Unknown method' });
         return function () {};
       }
       if (uri.indexOf('/listApps') >= 0) {
@@ -203,17 +233,18 @@ runAsync('la cadena luna pasa al siguiente servicio', () => {
   return new Promise((resolve, reject) => {
     luna.loadHome(client, (home) => {
       try {
+        assert.strictEqual(calls[0], luna.HB_EXEC);
         assert.strictEqual(home.appsKnown, true);
         assert.strictEqual(home.apps[0].id, 'com.webos.app.hdmi1');
         assert.strictEqual(home.inputsVia, 'apps');
         assert.ok(home.inputs.some((d) => d.id === 'HDMI_1'));
-        assert.ok(calls.indexOf('luna://com.webos.applicationManager/listLaunchPoints') >= 0);
         assert.ok(calls.indexOf('luna://com.webos.applicationManager/listApps') >= 0);
+        assert.ok(!calls.some((uri) => uri.indexOf('externaldevice') >= 0));
         resolve();
       } catch (err) { reject(err); }
     });
   });
-}).then(() => runAsync('la vista previa responde sin PalmServiceBridge', () => {
+}).then(() => runAsync('la vista previa lee exec y eim, sin Netflix', () => {
   assert.strictEqual(luna.detectPreview('?preview=1', true), true);
   assert.strictEqual(luna.detectPreview('?preview=0', false), false);
   assert.strictEqual(luna.detectPreview('', false), true);
@@ -223,9 +254,14 @@ runAsync('la cadena luna pasa al siguiente servicio', () => {
     luna.loadHome(client, (home) => {
       try {
         assert.strictEqual(home.appsKnown, true);
-        assert.ok(home.apps.some((a) => a.id === 'netflix'));
+        assert.ok(!home.apps.some((a) => a.id === 'netflix'));
+        assert.ok(home.apps.some((a) => a.id === 'com.palm.app.settings'));
+        assert.ok(home.apps.some((a) => a.id === 'canal.yomvi'));
         assert.strictEqual(home.inputs[0].id, 'TV');
-        assert.ok(String(home.inputsVia).indexOf('getExternalInputList') >= 0);
+        assert.ok(home.inputs.some((d) => d.label === 'AV1 (SCART)'));
+        assert.ok(home.inputs.some((d) => d.label === 'AV2'));
+        assert.ok(String(home.appsVia).indexOf('hbchannel.service/exec') >= 0);
+        assert.ok(String(home.inputsVia).indexOf('getAllInputStatus') >= 0);
         resolve();
       } catch (err) { reject(err); }
     });
