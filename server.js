@@ -11,6 +11,9 @@ const os = require('os');
 const WebSocket = require('ws');
 const { LGTV } = require('./lib/lgtv');
 const wol = require('./lib/wol');
+const { createCaster, parseYouTube } = require('./lib/cast');
+const castHttp = require('./lib/cast-http');
+const { createYtAutoOk, parseYtAutoOkMs } = require('./lib/yt-auto-ok');
 
 const DIR = __dirname;
 
@@ -34,9 +37,28 @@ function loadConfig() {
     wolAddresses: (env.WOL_ADDRESSES && env.WOL_ADDRESSES.split(',')) || file.wolAddresses || null,
     ytSearch: env.YT_SEARCH || file.ytSearch || '',
     wolPorts: (env.WOL_PORTS && env.WOL_PORTS.split(',').map(Number)) || file.wolPorts || [9, 7],
+    castHost: env.CAST_HOST || file.castHost || '',
+    castMaxMb: Number(env.CAST_MAX_MB || file.castMaxMb) || 2048,
+    castDir: env.CAST_DIR || file.castDir || path.join(os.tmpdir(), 'lg-remote-cast'),
+    castTtlHours: Number(env.CAST_TTL_HOURS || file.castTtlHours) || 12,
+    castDryRun: bool(env.CAST_DRY_RUN) ?? file.castDryRun ?? false,
+    ytAutoOkMs: parseYtAutoOkMs(
+      env.YT_AUTO_OK_MS !== undefined && env.YT_AUTO_OK_MS !== '' ? env.YT_AUTO_OK_MS : file.ytAutoOkMs,
+      18000,
+    ),
   };
   if (!cfg.wolAddresses) cfg.wolAddresses = ['255.255.255.255', wol.subnetBroadcast(cfg.tvIp), cfg.tvIp].filter(Boolean);
   if (!path.isAbsolute(cfg.stateFile)) cfg.stateFile = path.join(DIR, cfg.stateFile);
+  if (!path.isAbsolute(cfg.castDir)) cfg.castDir = path.join(DIR, cfg.castDir);
+  const bound = castHttp.listenHost(cfg.host);
+  if (bound !== cfg.host) {
+    console.warn('HOST', cfg.host, 'no sirve: la tele no tiene IPv6. Escuchando en', bound);
+    cfg.host = bound;
+  }
+  if (cfg.castHost && !castHttp.isIPv4(cfg.castHost)) {
+    console.warn('castHost ignorado (tiene que ser IPv4):', cfg.castHost);
+    cfg.castHost = '';
+  }
   return cfg;
 }
 const cfg = loadConfig();
@@ -104,6 +126,9 @@ function publicStatus() {
     firmware: live.info.sw ? live.info.sw.major_ver + '.' + live.info.sw.minor_ver : null,
     volume: live.volume,
     lastWol: live.lastWol,
+    castHost: advertiseHost(),
+    cast: publicCast(),
+    ytAutoOk: ytOk ? ytOk.snapshot() : { phase: 'idle', sent: false },
   };
 }
 
@@ -144,8 +169,17 @@ function inputIdFromAppId(appId) {
   return '';
 }
 function appIdFromInputId(id) {
-  const m = /^HDMI_?(\d+)$/i.exec(id);
-  return m ? 'com.webos.app.hdmi' + m[1] : '';
+  const s = String(id || '');
+  let m = /^HDMI_?(\d+)$/i.exec(s);
+  if (m) return 'com.webos.app.hdmi' + m[1];
+  m = /^AV_?(\d+)$/i.exec(s);
+  if (m) return 'com.webos.app.externalinput.av' + m[1];
+  // En esta tele SCART_1 es com.webos.app.externalinput.scart (sin número) y COMP_1 es component.
+  m = /^SCART_?(\d*)$/i.exec(s);
+  if (m) return 'com.webos.app.externalinput.scart' + (m[1] && m[1] !== '1' ? m[1] : '');
+  m = /^(?:COMP|COMPONENT)_?(\d*)$/i.exec(s);
+  if (m) return 'com.webos.app.externalinput.component' + (m[1] && m[1] !== '1' ? m[1] : '');
+  return '';
 }
 const inputApps = new Map(); // inputId -> appId (de la última lista)
 
@@ -177,13 +211,14 @@ async function getInputs() {
   let first;
   try {
     const r = await req('tv/getExternalInputList');
-    const devs = (r.devices || r.inputList || r.externalInputList || []).filter((d) => d && (d.id || d.appId));
+    const devs = (r.devices || r.inputList || r.externalInputList || []).filter((d) => d && (d.id || d.inputId || d.appId));
     if (devs.length) {
       const devices = devs.map((d) => {
-        const id = String(d.id || inputIdFromAppId(d.appId) || d.appId);
-        const appId = d.appId ? String(d.appId) : appIdFromInputId(id);
+        const id = String(d.id || d.inputId || inputIdFromAppId(d.appId) || d.appId);
+        const appId = d.appId ? String(d.appId) : (appIdFromInputId(id) || '');
         if (appId) inputApps.set(id, appId);
-        return { id, label: String(d.label || d.name || id), connected: d.connected, appId };
+        // connected:false no se descarta: en esta tele la entrada vacía sí cambia y muestra «sin señal».
+        return { id, label: String(d.label || d.name || id), connected: d.connected !== false, appId };
       });
       return { devices, via: 'getExternalInputList' };
     }
@@ -206,17 +241,30 @@ async function getInputs() {
 async function switchInput(id, appId) {
   if (!id && !appId) throw new Error('falta la entrada');
   appId = appId || inputApps.get(id) || appIdFromInputId(id) || (/^com\./.test(id) ? id : '');
-  let first;
-  if (id && !/^com\./.test(id)) {
-    try { return { via: 'switchInput', ...(await req('tv/switchInput', { inputId: id })) }; } catch (e) { first = e; }
-  }
-  // Alternativa (fiable en webOS 2): abrir la app de la entrada, p. ej. com.webos.app.hdmi1
+  // En webOS 2 tv/switchInput puede responder sin lanzar la app (la tele no cambia y apiadapter
+  // no registra ningún launch). La vía que sí cambia una entrada vacía es lanzar su appId.
+  const errors = [];
   if (appId) {
-    try { return { via: 'launch', appId, ...(await launchApp(appId)) }; } catch (e) {
-      throw new Error((first ? errMsg(first) + ' | ' : '') + errMsg(e));
+    try {
+      const r = await launchApp(appId);
+      log('entrada', id || appId, 'por launch', appId);
+      return { via: 'launch', appId, inputId: id || null, ...r };
+    } catch (e) {
+      errors.push(errMsg(e));
+      log('launch de entrada falló', appId, errMsg(e));
     }
   }
-  throw first || new Error('entrada desconocida: ' + id);
+  if (id && !/^com\./.test(id)) {
+    try {
+      const r = await req('tv/switchInput', { inputId: id });
+      log('entrada', id, 'por switchInput');
+      return { via: 'switchInput', appId: appId || null, inputId: id, ...r };
+    } catch (e) {
+      errors.push(errMsg(e));
+      log('switchInput falló', id, errMsg(e));
+    }
+  }
+  throw new Error(errors.join(' | ') || ('entrada desconocida: ' + (id || appId)));
 }
 
 async function launchApp(id, params) {
@@ -382,9 +430,135 @@ async function doAction(a) {
       return {};
     case 'status':
       return publicStatus();
+    case 'cast':
+      return castMedia(a);
+    case 'castControl':
+      return castControl(a);
+    case 'ytAutoOkCancel':
+      return ytOk.cancel('user');
     default:
       throw new Error('acción desconocida: ' + a.type);
   }
+}
+
+// ---------- Envío de medios (cast) por la LAN, solo IPv4 ----------
+const castState = { current: null };
+const castStore = castHttp.createCastStore({
+  dir: cfg.castDir,
+  maxBytes: cfg.castMaxMb * 1024 * 1024,
+  ttlMs: cfg.castTtlHours * 3600 * 1000,
+});
+castStore.sweep();
+const castSweep = setInterval(() => castStore.sweep(), 30 * 60 * 1000);
+castSweep.unref();
+
+let hostCache = { at: 0, ip: '' };
+function advertiseHost() {
+  if (cfg.castHost) return cfg.castHost;
+  if (cfg.host !== '0.0.0.0' && castHttp.isIPv4(cfg.host)) return cfg.host;
+  const now = Date.now();
+  if (now - hostCache.at < 5000 && hostCache.ip) return hostCache.ip;
+  const ip = castHttp.pickLanIPv4(os.networkInterfaces(), cfg.tvIp) || '127.0.0.1';
+  hostCache = { at: now, ip };
+  return ip;
+}
+function castFileUrl(meta) {
+  return 'http://' + advertiseHost() + ':' + cfg.port + '/cast/' + meta.token + '/' + encodeURIComponent(meta.name);
+}
+function publicCast() {
+  const c = castState.current;
+  if (!c) return null;
+  return { url: c.url, title: c.title, via: c.via, viaLabel: c.viaLabel, kind: c.kind, appId: c.appId, at: c.at, stopped: !!c.stopped };
+}
+
+const caster = createCaster({
+  request: (uri, payload) => req(uri, payload),
+  launch: (id, params) => launchApp(id, params),
+  button: (name) => tv.button(name),
+  log,
+});
+
+let ytOk = null;
+ytOk = createYtAutoOk({
+  getForeground: () => foregroundApp(),
+  pressEnter: () => tv.button('ENTER'),
+  isYouTube,
+  delayMs: cfg.ytAutoOkMs,
+  log,
+  onChange: () => broadcast({ event: 'status', ...publicStatus() }),
+});
+
+function scheduleYtAutoOk(wasForeground, method) {
+  if (!(cfg.ytAutoOkMs > 0)) return { skipped: true, reason: 'disabled' };
+  if (method === 'browser') return { skipped: true, reason: 'browser' };
+  if (wasForeground) return { skipped: true, reason: 'already-foreground' };
+  const armed = ytOk.arm();
+  log('YouTube no estaba delante: un OK dentro de', cfg.ytAutoOkMs, 'ms');
+  return armed;
+}
+
+async function castMedia(a) {
+  const dry = !!(a.dryRun || cfg.castDryRun);
+  const url = String(a.url || '');
+  const method = a.method || 'auto';
+  let youtubeTemplate = null;
+  let youtubeAppId = null;
+  let ytWasForeground = false;
+  const mayAutoOk = !dry && cfg.ytAutoOkMs > 0 && method !== 'browser' && parseYouTube(url);
+  if (mayAutoOk) ytWasForeground = isYouTube(await foregroundApp());
+  if (!dry && parseYouTube(url)) {
+    try {
+      const info = await youtubeAppInfo();
+      const dl = info.deeplinkingParams && info.deeplinkingParams.contentTarget;
+      if (typeof dl === 'string' && dl.includes('$CONTENTID')) youtubeTemplate = dl;
+      if (info.id) youtubeAppId = info.id;
+    } catch (_) { /* se usa la plantilla de la app web antigua */ }
+  }
+  const out = await caster.cast({
+    url, title: a.title, mime: a.mime, bytes: a.bytes,
+    method, variant: a.variant || 'auto',
+    dryRun: dry, advertiseHost: advertiseHost(), youtubeTemplate, youtubeAppId,
+  });
+  if (!dry) {
+    castState.current = Object.assign({ at: Date.now(), stopped: false }, out);
+    if (out.via === 'youtube') out.autoOk = scheduleYtAutoOk(ytWasForeground, method);
+    broadcast({ event: 'status', ...publicStatus() });
+  }
+  return out;
+}
+
+async function castControl(a) {
+  const out = await caster.control({
+    cmd: a.cmd,
+    seconds: a.seconds != null ? a.seconds : a.position,
+    session: castState.current,
+  });
+  if (String(a.cmd || '').toLowerCase() === 'stop' && castState.current) {
+    castState.current.stopped = true;
+    broadcast({ event: 'status', ...publicStatus() });
+  }
+  return out;
+}
+
+function castUpload(req, res) {
+  const u = new URL(req.url, 'http://x');
+  const name = u.searchParams.get('name') || req.headers['x-filename'] || 'media.bin';
+  if (/multipart\/form-data/i.test(req.headers['content-type'] || '')) {
+    req.resume();
+    return sendJson(res, 400, { ok: false, error: 'Sube el archivo en bruto (el botón de la página ya lo hace).' });
+  }
+  const len = Number(req.headers['content-length']);
+  if (Number.isFinite(len) && len > castStore.maxBytes) {
+    req.resume();
+    return sendJson(res, 413, { ok: false, error: 'archivo demasiado grande (máximo ' + castStore.maxBytes + ' bytes)' });
+  }
+  castStore.save(req, { name, mime: req.headers['content-type'] }).then((meta) => {
+    log('archivo para la tele', meta.name, meta.bytes, 'bytes →', castFileUrl(meta));
+    sendJson(res, 200, { ok: true, data: Object.assign({}, meta, { url: castFileUrl(meta) }) });
+  }).catch((e) => {
+    log('subida fallida', e.message);
+    sendJson(res, e.status || 400, { ok: false, error: e.message });
+  });
 }
 
 // ---------- HTTP ----------
@@ -392,6 +566,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const PUB = path.join(DIR, 'public');
 
 function sendJson(res, code, obj) {
+  if (res.writableEnded || res.destroyed) return;
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
 }
@@ -400,6 +575,16 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/api/status') return sendJson(res, 200, publicStatus());
   if (url.pathname === '/api/log') return sendJson(res, 200, { errors: errLog });
+  if (url.pathname === '/api/cast' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      host: advertiseHost(),
+      maxBytes: castStore.maxBytes,
+      cast: publicCast(),
+      files: castStore.list().map((f) => Object.assign({}, f, { url: castFileUrl(f) })),
+    });
+  }
+  if (url.pathname === '/api/cast/upload' && (req.method === 'PUT' || req.method === 'POST')) return castUpload(req, res);
+  if ((req.url || '').split('?')[0].startsWith('/cast/')) return castHttp.serveCast(req, res, castStore);
   if (url.pathname === '/api/action' && req.method === 'POST') {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
@@ -449,11 +634,20 @@ server.listen(cfg.port, cfg.host, () => {
   log(`Mando LG en http://127.0.0.1:${cfg.port}  (TV ${cfg.tvIp}, ${tv.url})`);
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
   if (cfg.host === '0.0.0.0' && ips.length) log('Desde otro dispositivo de la red:', ips.map((ip) => `http://${ip}:${cfg.port}`).join('  '));
+  log('Archivos para la tele (IPv4): http://' + advertiseHost() + ':' + cfg.port + '/cast/');
+  if (cfg.castDryRun) log('CAST_DRY_RUN: los envíos no se mandan a la tele');
+  log(cfg.ytAutoOkMs > 0 ? 'OK automático de YouTube: ' + cfg.ytAutoOkMs + ' ms' : 'OK automático de YouTube desactivado');
   if (!tvState.clientKey) log('Primera vez: acepta el aviso que aparecerá en la TV.');
   tv.start();
 });
 
-function shutdown() { tv.stop(); server.close(); process.exit(0); }
+function shutdown() {
+  clearInterval(castSweep);
+  if (ytOk) ytOk.cancel('shutdown');
+  tv.stop();
+  server.close();
+  process.exit(0);
+}
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
