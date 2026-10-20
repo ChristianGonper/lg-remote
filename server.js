@@ -169,8 +169,17 @@ function inputIdFromAppId(appId) {
   return '';
 }
 function appIdFromInputId(id) {
-  const m = /^HDMI_?(\d+)$/i.exec(id);
-  return m ? 'com.webos.app.hdmi' + m[1] : '';
+  const s = String(id || '');
+  let m = /^HDMI_?(\d+)$/i.exec(s);
+  if (m) return 'com.webos.app.hdmi' + m[1];
+  m = /^AV_?(\d+)$/i.exec(s);
+  if (m) return 'com.webos.app.externalinput.av' + m[1];
+  // En esta tele SCART_1 es com.webos.app.externalinput.scart (sin número) y COMP_1 es component.
+  m = /^SCART_?(\d*)$/i.exec(s);
+  if (m) return 'com.webos.app.externalinput.scart' + (m[1] && m[1] !== '1' ? m[1] : '');
+  m = /^(?:COMP|COMPONENT)_?(\d*)$/i.exec(s);
+  if (m) return 'com.webos.app.externalinput.component' + (m[1] && m[1] !== '1' ? m[1] : '');
+  return '';
 }
 const inputApps = new Map(); // inputId -> appId (de la última lista)
 
@@ -202,13 +211,14 @@ async function getInputs() {
   let first;
   try {
     const r = await req('tv/getExternalInputList');
-    const devs = (r.devices || r.inputList || r.externalInputList || []).filter((d) => d && (d.id || d.appId));
+    const devs = (r.devices || r.inputList || r.externalInputList || []).filter((d) => d && (d.id || d.inputId || d.appId));
     if (devs.length) {
       const devices = devs.map((d) => {
-        const id = String(d.id || inputIdFromAppId(d.appId) || d.appId);
-        const appId = d.appId ? String(d.appId) : appIdFromInputId(id);
+        const id = String(d.id || d.inputId || inputIdFromAppId(d.appId) || d.appId);
+        const appId = d.appId ? String(d.appId) : (appIdFromInputId(id) || '');
         if (appId) inputApps.set(id, appId);
-        return { id, label: String(d.label || d.name || id), connected: d.connected, appId };
+        // connected:false no se descarta: en esta tele la entrada vacía sí cambia y muestra «sin señal».
+        return { id, label: String(d.label || d.name || id), connected: d.connected !== false, appId };
       });
       return { devices, via: 'getExternalInputList' };
     }
@@ -231,17 +241,30 @@ async function getInputs() {
 async function switchInput(id, appId) {
   if (!id && !appId) throw new Error('falta la entrada');
   appId = appId || inputApps.get(id) || appIdFromInputId(id) || (/^com\./.test(id) ? id : '');
-  let first;
-  if (id && !/^com\./.test(id)) {
-    try { return { via: 'switchInput', ...(await req('tv/switchInput', { inputId: id })) }; } catch (e) { first = e; }
-  }
-  // Alternativa (fiable en webOS 2): abrir la app de la entrada, p. ej. com.webos.app.hdmi1
+  // En webOS 2 tv/switchInput puede responder sin lanzar la app (la tele no cambia y apiadapter
+  // no registra ningún launch). La vía que sí cambia una entrada vacía es lanzar su appId.
+  const errors = [];
   if (appId) {
-    try { return { via: 'launch', appId, ...(await launchApp(appId)) }; } catch (e) {
-      throw new Error((first ? errMsg(first) + ' | ' : '') + errMsg(e));
+    try {
+      const r = await launchApp(appId);
+      log('entrada', id || appId, 'por launch', appId);
+      return { via: 'launch', appId, inputId: id || null, ...r };
+    } catch (e) {
+      errors.push(errMsg(e));
+      log('launch de entrada falló', appId, errMsg(e));
     }
   }
-  throw first || new Error('entrada desconocida: ' + id);
+  if (id && !/^com\./.test(id)) {
+    try {
+      const r = await req('tv/switchInput', { inputId: id });
+      log('entrada', id, 'por switchInput');
+      return { via: 'switchInput', appId: appId || null, inputId: id, ...r };
+    } catch (e) {
+      errors.push(errMsg(e));
+      log('switchInput falló', id, errMsg(e));
+    }
+  }
+  throw new Error(errors.join(' | ') || ('entrada desconocida: ' + (id || appId)));
 }
 
 async function launchApp(id, params) {

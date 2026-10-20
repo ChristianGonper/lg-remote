@@ -87,14 +87,18 @@ function startServer(tvPort, wolPort) {
       assert.ok(r.ok, JSON.stringify(a) + ' ' + r.error);
     }
     const uris = mock.log.requests.slice(before).map((r) => r.uri);
-    for (const u of ['audio/volumeUp', 'audio/volumeDown', 'tv/channelUp', 'tv/channelDown', 'audio/setMute', 'media.controls/play', 'media.controls/pause', 'system.launcher/launch', 'com.webos.service.ime/insertText', 'com.webos.service.ime/sendEnterKey', 'com.webos.service.ime/deleteCharacters', 'tv/switchInput', 'system/turnOff']) {
+    for (const u of ['audio/volumeUp', 'audio/volumeDown', 'tv/channelUp', 'tv/channelDown', 'audio/setMute', 'media.controls/play', 'media.controls/pause', 'system.launcher/launch', 'com.webos.service.ime/insertText', 'com.webos.service.ime/sendEnterKey', 'com.webos.service.ime/deleteCharacters', 'system/turnOff']) {
       assert.ok(uris.includes('ssap://' + u), 'falta ' + u);
     }
+    assert.ok(mock.state.launched.some((p) => p.id === 'com.webos.app.hdmi2'));
     assert.equal(mock.state.input, 'HDMI_2');
     ok('volumen, canales, mute, media, Live TV, texto, entrada y apagado llegan a sus URIs');
     const inputs = await action({ type: 'inputs' });
     assert.equal(inputs.data.devices.length, 3);
-    ok('lista de entradas: ' + inputs.data.devices.map((d) => d.label).join(', '));
+    const hdmi2 = inputs.data.devices.find((d) => d.id === 'HDMI_2');
+    assert.equal(hdmi2.connected, false);
+    assert.equal(hdmi2.appId, 'com.webos.app.hdmi2');
+    ok('lista de entradas: ' + inputs.data.devices.map((d) => d.label).join(', ') + ' (HDMI2 sin señal sigue en la lista)');
     const apps = await action({ type: 'apps' });
     assert.equal(apps.data.apps.length, 2);
     ok('lista de apps');
@@ -119,7 +123,43 @@ function startServer(tvPort, wolPort) {
     const sw = await action({ type: 'input', id: 'HDMI_1', appId: 'com.webos.app.hdmi1' });
     assert.ok(sw.ok && sw.data.via === 'launch', JSON.stringify(sw));
     assert.equal(mock.state.input, 'HDMI_1');
-    ok('si switchInput falla, se abre la app de la entrada (com.webos.app.hdmi1)');
+    assert.equal(mock.state.foreground, 'com.webos.app.hdmi1');
+    for (const [id, app] of [
+      ['HDMI_2', 'com.webos.app.hdmi2'],
+      ['SCART_1', 'com.webos.app.externalinput.scart'],
+      ['AV_1', 'com.webos.app.externalinput.av1'],
+      ['AV_2', 'com.webos.app.externalinput.av2'],
+      ['COMP_1', 'com.webos.app.externalinput.component'],
+    ]) {
+      const n = mock.log.requests.length;
+      const r = await action({ type: 'input', id });
+      assert.ok(r.ok && r.data.via === 'launch' && r.data.appId === app, JSON.stringify(r));
+      const sent = mock.log.requests.slice(n).map((x) => x.uri);
+      assert.ok(sent.includes('ssap://system.launcher/launch'), sent.join(','));
+      assert.ok(!sent.includes('ssap://tv/switchInput'), 'no hacía falta switchInput: ' + sent.join(','));
+      assert.equal(mock.state.foreground, app);
+    }
+    ok('con switchInput rechazado, HDMI/SCART/AV/COMP se lanzan por su appId (también sin señal)');
+    mock.state.fail['system.launcher/launch'] = Infinity;
+    mock.state.fail['com.webos.applicationManager/launch'] = Infinity;
+    mock.state.fail['tv/switchInput'] = 0;
+    const viaSw = await action({ type: 'input', id: 'HDMI_1', appId: 'com.webos.app.hdmi1' });
+    assert.ok(viaSw.ok && viaSw.data.via === 'switchInput', JSON.stringify(viaSw));
+    assert.equal(mock.state.input, 'HDMI_1');
+    ok('si el launch falla, se usa tv/switchInput');
+    mock.state.fail['tv/switchInput'] = Infinity;
+    const both = await action({ type: 'input', id: 'AV_1' });
+    assert.equal(both.ok, false);
+    assert.ok(/system\.launcher\/launch/.test(both.error) && /tv\/switchInput/.test(both.error), both.error);
+    const elogIn = await fetch(`http://127.0.0.1:${HTTP_PORT}/api/log`).then((r) => r.json());
+    assert.ok(elogIn.errors.some((e) => /tv\/switchInput/.test(e.uri)));
+    assert.ok(elogIn.errors.some((e) => /system\.launcher\/launch/.test(e.uri)));
+    ok('si launch y switchInput fallan, el error cita las dos URI y queda en /api/log');
+    mock.state.fail = {};
+    const appjs = await fetch(`http://127.0.0.1:${HTTP_PORT}/app.js`).then((r) => r.text());
+    assert.ok(!appjs.includes('(sin señal)') && !appjs.includes("connected === false ? 'off'"));
+    ok('la lista no apaga el botón de una entrada sin señal');
+    mock.state.fail['com.webos.applicationManager/listLaunchPoints'] = Infinity;
     mock.state.fail['com.webos.applicationManager/listApps'] = Infinity;
     const bad = await action({ type: 'apps' });
     assert.ok(!bad.ok && /500 Application error/.test(bad.error) && /listLaunchPoints/.test(bad.error), bad.error);

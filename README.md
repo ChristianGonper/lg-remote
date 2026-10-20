@@ -138,7 +138,7 @@ Decisión actual: se enciende con el botón físico o el mando; el botón WoL qu
 | Vol +/− (mantener = repetir) | `ssap://audio/volumeUp` / `volumeDown` |
 | Silencio | `ssap://audio/setMute` alternando (estado de `audio/getVolume`); si falla, tecla `MUTE` |
 | CH +/− | `ssap://tv/channelUp` / `channelDown` |
-| Entrada | `ssap://tv/getExternalInputList` (si falla: apps HDMI/AV de `listLaunchPoints`/`listApps`) → `ssap://tv/switchInput {inputId}` (si falla: `system.launcher/launch com.webos.app.hdmiN`) (+ “TV”) |
+| Entrada | Solo las que devuelve `ssap://tv/getExternalInputList` (si falla: apps HDMI/AV de `listLaunchPoints`/`listApps`). Cambiar: `system.launcher/launch {id}` de esa app (`com.webos.app.hdmiN`, `externalinput.scart` / `av1` / `av2` / `component`); si el lanzamiento falla o no responde, `ssap://tv/switchInput {inputId}`. Una entrada sin señal se lista igual y se puede pulsar. |
 | Live TV | `ssap://system.launcher/launch {id: com.webos.app.livetv}` |
 | ▲ ▼ ◀ ▶ OK, Atrás, Inicio, Salir | pointer socket: `UP DOWN LEFT RIGHT ENTER BACK HOME EXIT` |
 | Ajustes, Q.MENU, Guía, Info, Lista | pointer socket: `MENU QMENU GUIDE INFO LIST` |

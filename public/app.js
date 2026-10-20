@@ -27,7 +27,7 @@
   }
 
   function send(action, quiet) {
-    const waitMs = action && (action.type === 'cast' || action.type === 'castControl') ? 20000 : 8000;
+    const waitMs = action && (action.type === 'cast' || action.type === 'castControl' || action.type === 'input') ? 20000 : 8000;
     return new Promise((resolve) => {
       const done = (m) => { if (!m.ok && !quiet) toast('⚠️ ' + m.error); resolve(m); };
       if (ws && ws.readyState === 1) {
@@ -155,14 +155,28 @@
     openSheet('Entradas', '<p class="note">Cargando…</p>');
     const r = await send({ type: 'inputs' });
     if (!r.ok) return openSheet('Entradas', `<p class="note">No se pudo leer la lista: ${esc(r.error)}</p>`);
-    const items = [{ id: '__livetv', label: 'TV (Live TV)', connected: true }, ...r.data.devices];
+    const items = [{ id: '__livetv', label: 'TV (Live TV)', appId: 'com.webos.app.livetv' }, ...r.data.devices];
     openSheet('Entradas', '<div class="list">' + items.map((d) =>
-      `<button class="b ${d.connected === false ? 'off' : ''}" data-input="${esc(d.id)}" data-app="${esc(d.appId || '')}">${esc(d.label)}${d.connected === false ? ' <small>(sin señal)</small>' : ''}</button>`).join('') + '</div>');
+      `<button class="b" type="button" data-input="${esc(d.id)}" data-app="${esc(d.appId || '')}">${esc(d.label)}</button>`).join('') + '</div>');
     $$('[data-input]', $('#sheetBody')).forEach((b) => b.addEventListener('click', async () => {
       buzz();
       const id = b.dataset.input;
-      const res = id === '__livetv' ? await send({ type: 'liveTv' }) : await send({ type: 'input', id, appId: b.dataset.app || '' });
-      if (res.ok) closeSheet();
+      b.disabled = true;
+      const res = id === '__livetv'
+        ? await send({ type: 'liveTv' })
+        : await send({ type: 'input', id, appId: b.dataset.app || '' }, true);
+      b.disabled = false;
+      if (res.ok) { closeSheet(); return; }
+      const msg = res.error || 'No se pudo cambiar de entrada';
+      toast('⚠️ ' + msg, 6000);
+      let box = $('#inputError');
+      if (!box) {
+        box = document.createElement('p');
+        box.id = 'inputError';
+        box.className = 'note';
+        $('#sheetBody').prepend(box);
+      }
+      box.textContent = msg;
     }));
   }
 
