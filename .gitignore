@@ -2,3 +2,4 @@ config.json
 tv-state.json
 tv-state.json.tmp
 *.log
+launcher/dist/
