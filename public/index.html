@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111214">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Mando LG</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <button class="status" id="status" data-act="info" aria-label="Estado de la conexión">
+    <span class="dot"></span><span id="statusText">Desconectado</span>
+  </button>
+  <span class="vol" id="volText" title="Volumen"></span>
+  <button class="icon" data-act="info" aria-label="Información">⚙︎</button>
+</header>
+<div class="banner hidden" id="promptBanner">📺 Mira la TV y pulsa <b>Aceptar</b> con el mando para emparejar.</div>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="mando">Mando</button>
+  <button class="tab" data-tab="numeros">Números</button>
+  <button class="tab" data-tab="touch">Touchpad</button>
+  <button class="tab" data-tab="texto">Texto / Apps</button>
+</nav>
+
+<main>
+<!-- ===================== MANDO ===================== -->
+<section class="page active" id="page-mando">
+  <div class="row r3">
+    <button class="b power-off" data-act="ssap:powerOff" data-confirm="¿Apagar la TV?">⏻<small>Apagar</small></button>
+    <button class="b" data-act="inputs">⇄<small>Entrada</small></button>
+    <button class="b" data-act="liveTv">📺<small>Live TV</small></button>
+  </div>
+
+  <div class="rockers">
+    <div class="rocker">
+      <button class="b" data-act="ssap:volumeUp" data-repeat>＋</button>
+      <span class="lbl">VOL</span>
+      <button class="b" data-act="ssap:volumeDown" data-repeat>－</button>
+    </div>
+    <div class="mid">
+      <button class="b" data-act="mute">🔇<small>Silencio</small></button>
+      <button class="b home" data-btn="HOME">⌂<small>Inicio</small></button>
+      <button class="b" data-btn="MENU">⚙<small>Ajustes</small></button>
+    </div>
+    <div class="rocker">
+      <button class="b" data-act="ssap:channelUp" data-repeat>⌃</button>
+      <span class="lbl">CH</span>
+      <button class="b" data-act="ssap:channelDown" data-repeat>⌄</button>
+    </div>
+  </div>
+
+  <div class="row r4">
+    <button class="b sm" data-btn="QMENU">Q.MENU</button>
+    <button class="b sm" data-btn="GUIDE">GUÍA</button>
+    <button class="b sm" data-btn="INFO">INFO</button>
+    <button class="b sm" data-btn="LIST">LISTA</button>
+  </div>
+
+  <div class="dpad">
+    <button class="d up" data-btn="UP" data-repeat aria-label="Arriba">▲</button>
+    <button class="d left" data-btn="LEFT" data-repeat aria-label="Izquierda">◀</button>
+    <button class="d ok" data-btn="ENTER">OK</button>
+    <button class="d right" data-btn="RIGHT" data-repeat aria-label="Derecha">▶</button>
+    <button class="d down" data-btn="DOWN" data-repeat aria-label="Abajo">▼</button>
+  </div>
+
+  <div class="row r2">
+    <button class="b" data-btn="BACK">↩<small>Atrás</small></button>
+    <button class="b" data-btn="EXIT">✕<small>Salir</small></button>
+  </div>
+
+  <div class="row r4 colors">
+    <button class="b red" data-btn="RED" aria-label="Rojo"></button>
+    <button class="b green" data-btn="GREEN" aria-label="Verde"></button>
+    <button class="b yellow" data-btn="YELLOW" aria-label="Amarillo"></button>
+    <button class="b blue" data-btn="BLUE" aria-label="Azul"></button>
+  </div>
+
+  <div class="row r5">
+    <button class="b" data-act="media:REWIND" aria-label="Rebobinar">⏪</button>
+    <button class="b" data-act="media:PLAY" aria-label="Play">▶</button>
+    <button class="b" data-act="media:PAUSE" aria-label="Pausa">⏸</button>
+    <button class="b" data-act="media:STOP" aria-label="Stop">⏹</button>
+    <button class="b" data-act="media:FASTFORWARD" aria-label="Avanzar">⏩</button>
+  </div>
+
+  <details class="more">
+    <summary>Más teclas</summary>
+    <div class="row r4">
+      <button class="b sm" data-btn="CC">Subtítulos</button>
+      <button class="b sm" data-btn="SAP">Audio</button>
+      <button class="b sm" data-btn="TELETEXT">Teletexto</button>
+      <button class="b sm" data-btn="TEXTOPTION">Opc. TXT</button>
+      <button class="b sm" data-btn="ASPECT_RATIO">Formato</button>
+      <button class="b sm" data-btn="AD">Audiodesc.</button>
+      <button class="b sm" data-btn="3D_MODE">3D</button>
+      <button class="b sm" data-btn="RECORD">● Grabar</button>
+      <button class="b sm" data-btn="PROGRAM">Programa</button>
+      <button class="b sm" data-btn="MYAPPS">Mis apps</button>
+      <button class="b sm" data-btn="RECENT">Recientes</button>
+      <button class="b sm" data-btn="ASTERISK">✱</button>
+      <button class="b sm" data-btn="POWER">POWER (tecla)</button>
+      <button class="b sm" data-act="screenOff">Pantalla off</button>
+      <button class="b sm" data-act="screenOn">Pantalla on</button>
+      <button class="b sm" data-btn="NETFLIX">Netflix</button>
+      <button class="b sm power-on" data-act="powerOn">⏻ Encender (WoL)</button>
+    </div>
+  </details>
+</section>
+
+<!-- ===================== NÚMEROS ===================== -->
+<section class="page" id="page-numeros">
+  <div class="numpad">
+    <button class="b n" data-btn="1">1</button><button class="b n" data-btn="2">2</button><button class="b n" data-btn="3">3</button>
+    <button class="b n" data-btn="4">4</button><button class="b n" data-btn="5">5</button><button class="b n" data-btn="6">6</button>
+    <button class="b n" data-btn="7">7</button><button class="b n" data-btn="8">8</button><button class="b n" data-btn="9">9</button>
+    <button class="b n" data-btn="DASH">–</button><button class="b n" data-btn="0">0</button><button class="b n" data-btn="ENTER">OK</button>
+  </div>
+  <div class="row r4">
+    <button class="b" data-act="ssap:channelUp" data-repeat>CH ⌃</button>
+    <button class="b" data-act="ssap:channelDown" data-repeat>CH ⌄</button>
+    <button class="b" data-btn="LIST">LISTA</button>
+    <button class="b" data-btn="BACK">↩</button>
+  </div>
+</section>
+
+<!-- ===================== TOUCHPAD ===================== -->
+<section class="page" id="page-touch">
+  <div class="touchpad" id="touchpad">
+    <span>Desliza para mover el puntero<br>Toca para clic · dos dedos para desplazar</span>
+  </div>
+  <div class="row r4">
+    <button class="b" data-act="click">Clic</button>
+    <button class="b" data-btn="BACK">↩<small>Atrás</small></button>
+    <button class="b" data-btn="HOME">⌂<small>Inicio</small></button>
+    <button class="b" data-btn="EXIT">✕<small>Salir</small></button>
+  </div>
+  <label class="sens">Sensibilidad <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.8"></label>
+</section>
+
+<!-- ===================== TEXTO / APPS ===================== -->
+<section class="page" id="page-texto">
+  <p class="hint">Abre primero un campo de texto en la TV (p. ej. el buscador de YouTube) para que aparezca su teclado.</p>
+  <form id="textForm" class="textform">
+    <input id="textIn" type="text" autocomplete="off" placeholder="Escribe aquí…" enterkeyhint="send">
+    <button class="b" type="submit">Enviar</button>
+  </form>
+  <div class="row r3">
+    <button class="b" data-act="delete">⌫<small>Borrar</small></button>
+    <button class="b" data-act="enter">⏎<small>Intro</small></button>
+    <button class="b" data-act="toast">💬<small>Aviso prueba</small></button>
+  </div>
+  <div class="row r1"><button class="b" data-act="apps">Cargar lista de apps</button></div>
+  <div class="list" id="appsList"></div>
+</section>
+</main>
+
+<!-- Hoja para entradas / info -->
+<div class="sheet hidden" id="sheet">
+  <div class="sheet-card">
+    <div class="sheet-head"><b id="sheetTitle"></b><button class="icon" id="sheetClose" aria-label="Cerrar">✕</button></div>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+<div class="toast hidden" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

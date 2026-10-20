@@ -1,0 +1,16 @@
+{
+  "name": "lg-remote",
+  "version": "0.1.0",
+  "description": "Mando web para TV LG webOS (SSAP) pensado para Termux",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/run-test.js"
+  },
+  "engines": { "node": ">=16" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
